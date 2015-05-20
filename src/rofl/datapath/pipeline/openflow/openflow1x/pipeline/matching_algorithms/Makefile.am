@@ -20,11 +20,11 @@ librofl_pipeline_openflow1x_pipeline_matching_algorithms_trie_ladir = \
 	$(library_includedir)/trie
 
 librofl_pipeline_openflow1x_pipeline_matching_algorithms_trie_la_HEADERS = \
-	l2hash/of1x_trie_ma.h\
-	l2hash/of1x_trie_ma_pp.h
+	trie/of1x_trie_ma.h\
+	trie/of1x_trie_ma_pp.h
 librofl_pipeline_openflow1x_pipeline_matching_algorithms_trie_la_SOURCES = \
-	l2hash/of1x_trie_ma.c \
-	l2hash/of1x_trie_ma.h
+	trie/of1x_trie_ma.c \
+	trie/of1x_trie_ma.h
 
 
 #l2hash

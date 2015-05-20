@@ -1,14 +1,13 @@
 #ifndef __OF1X_TRIE_MATCH_H__
 #define __OF1X_TRIE_MATCH_H__
 
-#include "rofl.h"
+#include "rofl_datapath.h"
 #include "../matching_algorithms.h"
 #include "../../of1x_flow_table.h"
 
 
 //Data structures
 typedef struct of1x_trie_leaf{
-
 	//Match
 	of1x_match_t match;
 
@@ -30,10 +29,7 @@ typedef struct of1x_trie_leaf{
 
 typedef struct of1x_trie{
 	//Active tree
-	of1x_trie_leaf_t* active;
-
-	//Unactive
-	of1x_trie_leaf_t* secondary;
+	of1x_trie_leaf_t* root;
 }of1x_trie_t;
 
 //C++ extern C
@@ -41,7 +37,7 @@ ROFL_BEGIN_DECLS
 
 //Nothing needed here
 
-//C++  xtern C
+//C++ extern C
 ROFL_END_DECLS
 
 #endif //TRIE_MATCH

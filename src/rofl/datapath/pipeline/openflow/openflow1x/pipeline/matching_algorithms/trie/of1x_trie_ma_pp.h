@@ -17,49 +17,39 @@
 //C++ extern C
 ROFL_BEGIN_DECLS
 
+// NOTE: this can never be inlined. Just putting it here
+static inline void of1x_check_leaf_trie(datapacket_t *const pkt, of1x_trie_leaf* leaf, int64_t* match_priority, of1x_flow_entry_t** best_match){
+
+	//Check inner
+	if(((int64_t)leaf->inner_max_priority) > match_priority){
+		//Check match
+		if(__of1x_check_match(pkt, &leaf->match)){
+			if(leaf->entry)
+				*best_match = leaf->entry
+
+			if(leaf->inner)
+				of1x_check_leaf_trie(left->inner, match_priority, best_match);
+		}
+	}
+
+	if(leaf->next)
+		of1x_check_leaf_trie(left->next, match_priority, best_match);
+	return;
+}
+
+
 /* FLOW entry lookup entry point */
 static inline of1x_flow_entry_t* of1x_find_best_match_trie_ma(of1x_flow_table_t *const table, datapacket_t *const pkt){
 
 	of1x_flow_entry_t* best_match = NULL;
 	int64_t match_priority = -1;
 	struct of1x_trie* trie = ((of1x_trie_t*)table->matching_aux[0]);
-	struct of1x_trie_leaf* curr = trie->active;
+	struct of1x_trie_leaf* leaf = trie->active;
 
-	if(curr){
-OF1X_TRIE_CHECK_LEAF:
-		//Check inner
-		if( ((int64_t)curr->inner_max_priority) > match_priority){
+	//TODO add rwlock / fence
 
-			//Check match
-			if(__of1x_check_match(pkt, &curr->match)){
-				if(entry)
-					best_match = curr->entry
-
-				if(curr->inner){
-					curr = curr->inner;
-					goto OF1X_TRIE_CHECK_LEAF;
-				}
-			}
-			goto OF1X_TRIE_NEXT;
-		}
-
-OF1X_TRIE_NEXT:
-		//Check next
-		curr = curr->next;
-		if(curr)
-			goto OF1X_TRIE_CHECK_LEAF;
-		else{
-			//Go to parent
-			curr = curr->parent;
-			if(!curr->parent)
-				goto OF1X_TRIE_END;
-			else
-				goto OF1X_TRIE_NEXT;
-		}
-	}
-
-OF1X_TRIE_END:
-	return best_match;
+	//Start recursion
+	of1x_check_leaf_trie(pkt, leaf, &match_priority, &best_match);
 }
 
 //C++ extern C
