@@ -185,45 +185,205 @@ static inline int __of1x_get_next_match(of1x_flow_entry_t *const entry, int curr
 //
 //Leaf mgmt
 //
-static void  __of1x_create_new_branch_trie(struct of1x_trie_leaf* l,
-							int m_it,
-							of1x_flow_entry_t *const entry){
-	struct of1x_trie_leaf *new_branch, *tmp;
+static of1x_trie_leaf_t*  __of1x_create_new_branch_trie(int m_it, of1x_flow_entry_t *const entry){
+
+	of1x_trie_leaf_t *new_branch = NULL;
+	of1x_trie_leaf_t *last_leaf = NULL;
+	of1x_trie_leaf_t *tmp;
 	of1x_match_t* m;
 
-	while(__of1x_get_next_match(entry, m_it) != -1){
-		m_it = __of1x_get_next_match(entry, m_it);
-		 = __of1x_get_alike_match(entry->matches.m_array[m_it]); 
+	while(m_it != -1){
+		m = entry->matches.m_array[m_it];
+
+		//Allocate space
+		tmp = (of1x_trie_leaf_t*)platform_malloc_shared(sizeof(of1x_trie_leaf_t));
 		if(!tmp){
+			//Out of memory
 			assert(0);
 			return NULL;
 		}
-		if(branch
+
+		//Copy (cannot fail)
+		if(__of1x_get_alike_match(m, m, &tmp->match)){
+			assert(0);
+			return NULL;
+		}
+
+		//Fill-in
+		last_leaf->entry = NULL;
+		last_leaf->next = last_leaf->prev = NULL;
+		last_leaf->inner_max_priority = entry->priority;
+
+		//Set the linked list
+		if(!last_leaf){
+			new_branch = last_leaf = tmp;
+		}else{
+			last_leaf->inner = tmp;
+			tmp->parent = last_leaf;
+			last_leaf = tmp;
+		}
+		m_it = __of1x_get_next_match(entry, m_it);
 	}
 
-	return branch;
+	last_leaf->entry = entry;
+
+	return new_branch;
 }
 
 
-static void  __of1x_insert_new_leaf_trie(struct of1x_trie_leaf l,
+//Append to the "next"
+static rofl_of1x_fm_result_t __of1x_insert_next_leaf_trie(struct of1x_trie_leaf* l,
 							int m_it,
 							of1x_flow_entry_t *const entry){
 
 	struct of1x_trie_leaf* new_branch;
 
-	new_branch = 
+	//Get the new branch
+	new_branch = __of1x_create_new_branch_trie(m_it, entry);
+
+	if(!new_branch)
+		return ROFL_OF1X_FM_FAILURE;
+
+	//Fill-in missing information
+	new_branch->parent = l->parent;
+	new_branch->prev = l;
+
+	//
+	//Adjust inner max priority
+	//
+
+	//First adjust our own group head
+	if(l->parent && (l->parent->inner->inner_max_priority < entry->priority)){
+		l->parent->inner->inner_max_priority = entry->priority;
+	}
+
+	//Then go recursively down
+	l = l->parent;
+	while(l){
+		if(l->inner_max_priority < entry->priority)
+			l->inner_max_priority = entry->priority;
+		else
+			break;
+		l = l->parent;
+	}
 
 	//We append as next
-	l->next = 
+	entry->prev = entry->next = NULL;
+	l->next = new_branch;
+
+	return ROFL_OF1X_FM_SUCCESS;
 }
 
+//Add an intermediate match and branch from that point
+static rofl_of1x_fm_result_t __of1x_insert_intermediate_leaf_trie(struct of1x_trie_leaf* l,
+							int m_it,
+							of1x_flow_entry_t *const entry){
+	of1x_trie_leaf_t *intermediate;
+	struct of1x_trie_leaf* new_branch;
+	of1x_match_t* m;
+
+	m_it = __of1x_get_next_match(entry, m_it);
+	m = entry->matches.m_array[m_it];
+
+	//Allocate space
+	intermediate = (of1x_trie_leaf_t*)platform_malloc_shared(sizeof(of1x_trie_leaf_t));
+	if(!intermediate){
+		//Out of memory
+		assert(0);
+		return ROFL_OF1X_FM_FAILURE;
+	}
+
+	//Get the common part
+	if(!__of1x_get_alike_match(&l->match, m, &intermediate->match)){
+		//Can never (ever) happen
+		assert(0);
+		return ROFL_OF1X_FM_FAILURE;
+	}
+
+	//Get the new branch
+	new_branch = __of1x_create_new_branch_trie(m_it, entry);
+
+	if(!new_branch)
+		return ROFL_OF1X_FM_FAILURE;
+
+
+	//Fill in the intermediate and new branch
+	new_branch->parent = intermediate;
+	new_branch->prev = l;
+	new_branch->next = NULL;
+	entry->prev = entry->next = NULL;
+	intermediate->inner = l;
+	l->next = new_branch;
+
+	//
+	//Adjust inner_max_priority
+	//
+	if(l->inner_max_priority < entry->priority){
+		//Adjust intermediate
+		intermediate->inner_max_priority = entry->priority;
+
+		//Recursively adjust
+		l = intermediate->parent;
+		while(l){
+			if(l->inner_max_priority < entry->priority)
+				l->inner_max_priority = entry->priority;
+			else
+				break;
+			l = l->parent;
+		}
+	}else{
+		intermediate->inner_max_priority = l->inner_max_priority;
+	}
+
+	return ROFL_OF1X_FM_SUCCESS;
+}
+
+static rofl_of1x_fm_result_t __of1x_insert_terminal_leaf_trie(struct of1x_trie_leaf* l,
+							int m_it,
+							of1x_flow_entry_t *const entry){
+	uint32_t max_priority = entry->priority;
+	of1x_flow_entry_t* tmp;
+
+	//l is the terminal leaf (entry has no more matches)
+	if(l->entry){
+		//Append to the very last in the linked list
+		tmp = l->entry;
+		while(tmp->next){
+			if(tmp->priority > max_priority)
+				max_priority = tmp->priority;
+			tmp = tmp->next;
+		}
+		tmp->next = entry;
+		entry->prev = tmp;
+	}else{
+		l->entry = entry;
+		entry->prev = NULL;
+	}
+	entry->next = NULL;
+
+	//
+	//Adjust inner_max_priority
+	//
+	max_priority = (max_priority > l->inner_max_priority)? max_priority : l->inner_max_priority;
+	while(l){
+		if(l->inner_max_priority < max_priority)
+			l->inner_max_priority = max_priority;
+		else
+			break;
+		l = l->parent;
+	}
+
+	return ROFL_OF1X_FM_SUCCESS;
+}
+
+//Perform the real addition to the trie
 rofl_of1x_fm_result_t __of1x_add_leafs_trie(of1x_trie_t* trie,
 							of1x_flow_entry_t *const entry){
 
 	int m_it;
 	struct of1x_trie_leaf *l, *l_prev;
-	struct of1x_trie_leaf *tmp, *branch;
 	of1x_match_t* m;
+	rofl_of1x_fm_result_t res = ROFL_OF1X_FM_SUCCESS;
 
 	//Determine entry's first match
 	m_it = __of1x_get_next_match(entry, -1);
@@ -245,7 +405,7 @@ rofl_of1x_fm_result_t __of1x_add_leafs_trie(of1x_trie_t* trie,
 		if(!__of1x_is_alike_match(m, &l->match)){
 			if(!l->next){
 				//This is the point of insertion
-				__of1x_insert_new_leaf_trie(l, m_it, m, entry);
+				res = __of1x_insert_next_leaf_trie(l, m_it, entry);
 				break;
 			}
 
@@ -261,7 +421,7 @@ rofl_of1x_fm_result_t __of1x_add_leafs_trie(of1x_trie_t* trie,
 		//If they do and the leaf is not a submatch, then
 		//this is the point of insertion
 		if(!__of1x_is_submatch(m, &l->match)){
-			__of1x_insert_intermediate_leaf_trie(l, m_it, m, entry);
+			res = __of1x_insert_intermediate_leaf_trie(l, m_it, entry);
 			goto ADD_LEAFS_END;
 		}
 
@@ -271,7 +431,7 @@ rofl_of1x_fm_result_t __of1x_add_leafs_trie(of1x_trie_t* trie,
 			//Increment match
 			if(__of1x_get_next_match(entry, m_it) == -1){
 				//No more matches; this is the insertion point
-				__of1x_insert_terminal_leaf_trie(l, m_it, m, entry);
+				res = __of1x_insert_terminal_leaf_trie(l, m_it, entry);
 				break;
 			}
 			m_it = __of1x_get_next_match(entry, m_it);
@@ -288,7 +448,7 @@ rofl_of1x_fm_result_t __of1x_add_leafs_trie(of1x_trie_t* trie,
 
 ADD_LEAFS_END:
 
-	return ROFL_OF1X_FM_SUCCESS;
+	return res;
 }
 
 //
@@ -352,7 +512,7 @@ rofl_of1x_fm_result_t of1x_add_flow_entry_trie(of1x_flow_table_t *const table,
 	prev = NULL;
 	next = trie->root;
 
-	//If we arrived in here, we have to add the entry (no existing entries)
+	//If we got in here, we have to add the entry (no existing entries)
 	res = __of1x_add_leafs_trie(trie, entry);
 
 ADD_END:
