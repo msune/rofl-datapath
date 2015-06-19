@@ -20,6 +20,9 @@ typedef struct of1x_trie_leaf{
 	//Inner branch(es)
 	struct of1x_trie_leaf* inner;
 
+	//Prev
+	struct of1x_trie_leaf* prev;
+
 	//Next
 	struct of1x_trie_leaf* next;
 
