@@ -62,10 +62,50 @@ rofl_result_t of1x_destroy_trie(struct of1x_flow_table *const table){
 }
 
 //
+//Linked-list
+//
+void __of1x_append_ll_prio_trie(of1x_flow_entry_t** head, of1x_flow_entry_t* entry){
+
+	of1x_flow_entry_t *tmp;
+
+	//No head
+	if(*head == NULL){
+		entry->prev = entry->next = NULL;
+		*head = entry;
+		return;
+	}
+
+	//Loop over the entries and find the right position
+	tmp = *head;
+	while(1){
+		//Insert before tmp
+		if(tmp->priority < entry->priority){
+			tmp->prev->next = entry;
+			tmp->prev = entry;
+			entry->prev = tmp->prev;
+			entry->next = tmp;
+			return;
+		}
+		//If it is the last one insert in the tail
+		//and return
+		if(!tmp->next){
+			tmp->next = entry;
+			entry->prev = tmp;
+			entry->next = NULL;
+			return;
+		}
+		tmp = tmp->next;
+	}
+
+	//Cannot reach this point
+	assert(0);
+}
+
+//
 //Helper functions
 //
-static bool __of1x_is_tern_submatch_trie(of1x_match_t* match, of1x_flow_entry_t *const entry){
-	of1x_match_t* sub_match = entry->matches.m_array[match->type];
+static bool __of1x_is_tern_submatch_trie(of1x_match_t* match, of1x_match_group_t *const matches){
+	of1x_match_t* sub_match = matches->m_array[match->type];
 	if(!sub_match)
 		return false;
 	return __of1x_is_submatch(sub_match, match);
@@ -73,7 +113,7 @@ static bool __of1x_is_tern_submatch_trie(of1x_match_t* match, of1x_flow_entry_t 
 
 
 //Find overlapping entries
-static of1x_flow_entry_t* of1x_find_reen_trie(of1x_flow_entry_t *const entry,
+static of1x_flow_entry_t* of1x_find_reen_trie( of1x_match_group_t *const matches,
 								struct of1x_trie_leaf** prev,
 								struct of1x_trie_leaf** next,
 								bool check_overlap){
@@ -103,12 +143,12 @@ FIND_START:
 	leaf_match = &curr->match;
 	if(check_overlap){
 		//Overlap
-		if( !__of1x_is_tern_submatch_trie(leaf_match, entry) &&
-			 !__of1x_is_tern_submatch_trie(leaf_match, entry) )
+		if( !__of1x_is_tern_submatch_trie(leaf_match, matches) &&
+			 !__of1x_is_tern_submatch_trie(leaf_match, matches) )
 			goto FIND_NEXT;
 	}else{
 		//Contained
-		if( !__of1x_is_tern_submatch_trie(leaf_match, entry))
+		if( !__of1x_is_tern_submatch_trie(leaf_match, matches))
 			goto FIND_NEXT;
 	}
 
@@ -203,7 +243,10 @@ static of1x_trie_leaf_t*  __of1x_create_new_branch_trie(int m_it, of1x_flow_entr
 			return NULL;
 		}
 
-		//Copy (cannot fail)
+		//Init
+		memset(tmp, 0, sizeof(of1x_trie_leaf_t));
+
+		//Copy match (cannot fail)
 		if(__of1x_get_alike_match(m, m, &tmp->match)){
 			assert(0);
 			return NULL;
@@ -307,13 +350,26 @@ static rofl_of1x_fm_result_t __of1x_insert_intermediate_leaf_trie(struct of1x_tr
 		return ROFL_OF1X_FM_FAILURE;
 
 
+	//
 	//Fill in the intermediate and new branch
+	//
+
+	//Intermediate leaf
+	intermediate->inner = l;
+	intermediate->prev = intermediate->next = NULL;
+	intermediate->parent = l->parent;
+
+	//new branch
 	new_branch->parent = intermediate;
 	new_branch->prev = l;
 	new_branch->next = NULL;
-	entry->prev = entry->next = NULL;
-	intermediate->inner = l;
+
+	//Previous leaf, now child
+	l->parent = intermediate;
 	l->next = new_branch;
+
+	//Entry linked list
+	entry->prev = entry->next = NULL;
 
 	//
 	//Adjust inner_max_priority
@@ -335,6 +391,9 @@ static rofl_of1x_fm_result_t __of1x_insert_intermediate_leaf_trie(struct of1x_tr
 		intermediate->inner_max_priority = l->inner_max_priority;
 	}
 
+	//Now insert
+	intermediate->parent->inner = intermediate;
+
 	return ROFL_OF1X_FM_SUCCESS;
 }
 
@@ -342,19 +401,11 @@ static rofl_of1x_fm_result_t __of1x_insert_terminal_leaf_trie(struct of1x_trie_l
 							int m_it,
 							of1x_flow_entry_t *const entry){
 	uint32_t max_priority = entry->priority;
-	of1x_flow_entry_t* tmp;
 
 	//l is the terminal leaf (entry has no more matches)
 	if(l->entry){
 		//Append to the very last in the linked list
-		tmp = l->entry;
-		while(tmp->next){
-			if(tmp->priority > max_priority)
-				max_priority = tmp->priority;
-			tmp = tmp->next;
-		}
-		tmp->next = entry;
-		entry->prev = tmp;
+		__of1x_append_ll_prio_trie(&l->entry, entry);
 	}else{
 		l->entry = entry;
 		entry->prev = NULL;
@@ -381,7 +432,7 @@ rofl_of1x_fm_result_t __of1x_add_leafs_trie(of1x_trie_t* trie,
 							of1x_flow_entry_t *const entry){
 
 	int m_it;
-	struct of1x_trie_leaf *l, *l_prev;
+	struct of1x_trie_leaf *l;
 	of1x_match_t* m;
 	rofl_of1x_fm_result_t res = ROFL_OF1X_FM_SUCCESS;
 
@@ -391,25 +442,24 @@ rofl_of1x_fm_result_t __of1x_add_leafs_trie(of1x_trie_t* trie,
 	if(m_it == -1){
 		//This is an empty entry, therefore it needs to be
 		//added in the root of the tree
-		//FIXME TODO XXX
+		__of1x_append_ll_prio_trie(&trie->entry, entry);
+		goto ADD_LEAFS_END;
 	}
 
 	//Start by the very first leaf
 	l = trie->root;
-	l_prev = NULL;
 	m = entry->matches.m_array[m_it];
 
 	//Determine the point of insertion
 	while(l){
 		//Check if they share something
-		if(!__of1x_is_alike_match(m, &l->match)){
+		if(!__of1x_get_alike_match(m, &l->match, NULL)){
 			if(!l->next){
 				//This is the point of insertion
 				res = __of1x_insert_next_leaf_trie(l, m_it, entry);
 				break;
 			}
 
-			l_prev = l;
 			l = l->next;
 			continue;
 		}
@@ -439,10 +489,10 @@ rofl_of1x_fm_result_t __of1x_add_leafs_trie(of1x_trie_t* trie,
 		}
 
 		//We have to go deeper
-		l_prev = l;
 		l = l->inner;
 	}
 
+	//We shall never reach this point
 	assert(0);
 	return ROFL_OF1X_FM_FAILURE;
 
@@ -472,7 +522,7 @@ rofl_of1x_fm_result_t of1x_add_flow_entry_trie(of1x_flow_table_t *const table,
 		//Point to the root of the tree
 		prev = NULL;
 		next = trie->root;
-		curr_entry = of1x_find_reen_trie(entry, &prev, &next, true);
+		curr_entry = of1x_find_reen_trie(&entry->matches, &prev, &next, true);
 
 		//Check cookie and priority
 		if(curr_entry && __of1x_check_priority_cookie_trie(entry,
@@ -480,7 +530,7 @@ rofl_of1x_fm_result_t of1x_add_flow_entry_trie(of1x_flow_table_t *const table,
 									true,
 									false)){
 			res = ROFL_OF1X_FM_OVERLAP;
-			ROFL_PIPELINE_ERR("[flowmod-add(%p)][trie] Overlaps with another entry (%p)\n", entry, curr_entry);
+			ROFL_PIPELINE_ERR("[flowmod-add(%p)][trie] Overlaps with, at least, another entry (%p)\n", entry, curr_entry);
 			goto ADD_END;
 		}
 	}
@@ -489,8 +539,8 @@ rofl_of1x_fm_result_t of1x_add_flow_entry_trie(of1x_flow_table_t *const table,
 	prev = NULL;
 	next = trie->root;
 
-	//Check existent (there can be only one, but there can be multiple ones chained under "next"
-	//poitner (different priorities)
+	//Check existent (they can only be in this position of the trie,
+	//but there can be multiple ones chained under "next" pointer (different priorities)
 	curr_entry = of1x_find_exact_trie(entry, &next);
 
 	while(curr_entry){
@@ -541,7 +591,7 @@ rofl_result_t of1x_remove_flow_entry_trie(of1x_flow_table_t *const table,
 rofl_result_t of1x_get_flow_stats_trie(struct of1x_flow_table *const table,
 		uint64_t cookie,
 		uint64_t cookie_mask,
-		uint32_t out_port, 
+		uint32_t out_port,
 		uint32_t out_group,
 		of1x_match_group_t *const matches,
 		of1x_stats_flow_msg_t* msg){
@@ -552,7 +602,7 @@ rofl_result_t of1x_get_flow_stats_trie(struct of1x_flow_table *const table,
 rofl_result_t of1x_get_flow_aggregate_stats_trie(struct of1x_flow_table *const table,
 		uint64_t cookie,
 		uint64_t cookie_mask,
-		uint32_t out_port, 
+		uint32_t out_port,
 		uint32_t out_group,
 		of1x_match_group_t *const matches,
 		of1x_stats_flow_aggregate_msg_t* msg){

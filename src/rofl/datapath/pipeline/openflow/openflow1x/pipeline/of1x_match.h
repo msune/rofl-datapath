@@ -984,7 +984,6 @@ bool __of1x_get_alike_match(of1x_match_t* match1, of1x_match_t* match2, of1x_mat
 */
 bool __of1x_equal_matches(of1x_match_t* match1, of1x_match_t* match2);
 bool __of1x_is_submatch(of1x_match_t* sub_match, of1x_match_t* match);
-bool __of1x_is_alike_match(of1x_match_t* sub_match, of1x_match_t* match);
 
 
 /*

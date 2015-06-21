@@ -11,7 +11,7 @@ typedef struct of1x_trie_leaf{
 	//Match
 	of1x_match_t match;
 
-	//Flow entry
+	//Flow entry/ies (ordered by priority)
 	of1x_flow_entry_t* entry;
 
 	//Inner max priority
@@ -31,8 +31,11 @@ typedef struct of1x_trie_leaf{
 }of1x_trie_leaf_t;
 
 typedef struct of1x_trie{
-	//Active tree
+	//Root leaf
 	of1x_trie_leaf_t* root;
+
+	//Entries with no matches (ordered by priority)
+	of1x_flow_entry_t* entry;
 }of1x_trie_t;
 
 //C++ extern C
