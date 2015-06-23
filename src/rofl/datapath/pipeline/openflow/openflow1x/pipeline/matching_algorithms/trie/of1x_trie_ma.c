@@ -64,9 +64,14 @@ rofl_result_t of1x_destroy_trie(struct of1x_flow_table *const table){
 //
 //Linked-list
 //
-void __of1x_append_ll_prio_trie(of1x_flow_entry_t** head, of1x_flow_entry_t* entry){
+void __of1x_add_ll_prio_trie(of1x_flow_entry_t** head, of1x_flow_entry_t* entry){
 
 	of1x_flow_entry_t *tmp;
+
+	if(!head){
+		assert(0);
+		return;
+	}
 
 	//No head
 	if(*head == NULL){
@@ -101,22 +106,54 @@ void __of1x_append_ll_prio_trie(of1x_flow_entry_t** head, of1x_flow_entry_t* ent
 	assert(0);
 }
 
+void __of1x_remove_ll_prio_trie(of1x_flow_entry_t** head, of1x_flow_entry_t* entry){
+
+	if(!head || *head == NULL){
+		assert(0);
+		return;
+	}
+
+	if(entry == *head){
+		//It is the head
+		*head = entry->next;
+		if(entry->next)
+			entry->next->prev = NULL;
+	}else{
+		//This is used during matching
+		entry->prev->next = entry->next;
+
+		//This is not
+		entry->next->prev = entry->prev;
+	}
+}
+
 //
 //Helper functions
 //
-static bool __of1x_is_tern_submatch_trie(of1x_match_t* match, of1x_match_group_t *const matches){
+static bool __of1x_is_tern_submatch_trie(of1x_match_t* match,
+							of1x_match_group_t *const matches){
 	of1x_match_t* sub_match = matches->m_array[match->type];
 	if(!sub_match)
 		return false;
 	return __of1x_is_submatch(sub_match, match);
 }
 
+static bool __of1x_is_tern_complete_match_trie(of1x_match_t* match,
+							of1x_match_group_t *const matches){
+	of1x_match_t* mg = matches->m_array[match->type];
+	of1x_match_t alike_match;
+
+	if(__of1x_get_alike_match(match, mg, &alike_match))
+		return false;
+	return __of1x_equal_matches(match, &alike_match);
+}
 
 //Find overlapping entries
 static of1x_flow_entry_t* of1x_find_reen_trie( of1x_match_group_t *const matches,
 								struct of1x_trie_leaf** prev,
 								struct of1x_trie_leaf** next,
-								bool check_overlap){
+								bool check_overlap,
+								bool check_complete){
 	of1x_flow_entry_t* res = NULL;
 	of1x_match_t* leaf_match;
 	of1x_trie_leaf_t* curr;
@@ -168,9 +205,17 @@ FIND_START:
 
 	//Check inner leafs
 	if(curr->inner){
+		if(check_complete){
+			//If check_complete is 1, we have to make sure
+			//we match completely and not partially the match
+			if(leaf_match->type != curr->inner->match.type &&
+				! __of1x_is_tern_complete_match_trie(leaf_match, matches))
+				goto FIND_NEXT;
+		}
 		//Check inner
 		(*prev) = curr;
 		*next = curr->inner;
+
 		goto FIND_START;
 	}
 
@@ -181,16 +226,6 @@ FIND_NEXT:
 
 FIND_END:
 	return res;
-}
-
-//Find equal
-static of1x_flow_entry_t* of1x_find_exact_trie(of1x_flow_entry_t *const entry,
-								struct of1x_trie_leaf** leaf){
-
-	//Careful when jumping to match type 1 to 2; the leaf may be an incomplete
-	//match of entry and would give false "equality"
-
-	return NULL;
 }
 
 //
@@ -405,7 +440,7 @@ static rofl_of1x_fm_result_t __of1x_insert_terminal_leaf_trie(struct of1x_trie_l
 	//l is the terminal leaf (entry has no more matches)
 	if(l->entry){
 		//Append to the very last in the linked list
-		__of1x_append_ll_prio_trie(&l->entry, entry);
+		__of1x_add_ll_prio_trie(&l->entry, entry);
 	}else{
 		l->entry = entry;
 		entry->prev = NULL;
@@ -442,7 +477,7 @@ rofl_of1x_fm_result_t __of1x_add_leafs_trie(of1x_trie_t* trie,
 	if(m_it == -1){
 		//This is an empty entry, therefore it needs to be
 		//added in the root of the tree
-		__of1x_append_ll_prio_trie(&trie->entry, entry);
+		__of1x_add_ll_prio_trie(&trie->entry, entry);
 		goto ADD_LEAFS_END;
 	}
 
@@ -512,7 +547,7 @@ rofl_of1x_fm_result_t of1x_add_flow_entry_trie(of1x_flow_table_t *const table,
 	rofl_of1x_fm_result_t res = ROFL_OF1X_FM_SUCCESS;
 	of1x_trie_t* trie = (of1x_trie_t*)table->matching_aux[0];
 	struct of1x_trie_leaf *prev, *next;
-	of1x_flow_entry_t* curr_entry;
+	of1x_flow_entry_t* curr_entry, *to_be_removed=NULL;
 
 	//Allow single add/remove operation over the table
 	platform_mutex_lock(table->mutex);
@@ -522,17 +557,34 @@ rofl_of1x_fm_result_t of1x_add_flow_entry_trie(of1x_flow_table_t *const table,
 		//Point to the root of the tree
 		prev = NULL;
 		next = trie->root;
-		curr_entry = of1x_find_reen_trie(&entry->matches, &prev, &next, true);
 
-		//Check cookie and priority
-		if(curr_entry && __of1x_check_priority_cookie_trie(entry,
-									curr_entry,
-									true,
-									false)){
-			res = ROFL_OF1X_FM_OVERLAP;
-			ROFL_PIPELINE_ERR("[flowmod-add(%p)][trie] Overlaps with, at least, another entry (%p)\n", entry, curr_entry);
-			goto ADD_END;
-		}
+		//No match entries
+		curr_entry = trie->entry;
+
+		do{
+			//Get next overlapping
+			if(!curr_entry){
+				curr_entry = of1x_find_reen_trie(&entry->matches, &prev,
+										&next,
+										true,
+										false);
+
+				//If no more entries are found, we are done
+				if(!curr_entry)
+					break;
+			}
+
+			//Check cookie and priority
+			if(curr_entry && __of1x_check_priority_cookie_trie(entry,
+										curr_entry,
+										true,
+										false)){
+				res = ROFL_OF1X_FM_OVERLAP;
+				ROFL_PIPELINE_ERR("[flowmod-add(%p)][trie] Overlaps with, at least, another entry (%p)\n", entry, curr_entry);
+				goto ADD_END;
+			}
+			curr_entry = curr_entry->next;
+		}while(1);
 	}
 
 	//Point to the root of the tree
@@ -541,21 +593,33 @@ rofl_of1x_fm_result_t of1x_add_flow_entry_trie(of1x_flow_table_t *const table,
 
 	//Check existent (they can only be in this position of the trie,
 	//but there can be multiple ones chained under "next" pointer (different priorities)
-	curr_entry = of1x_find_exact_trie(entry, &next);
-
+	curr_entry = of1x_find_reen_trie(&entry->matches, &prev, &next,
+									true,
+									true);
 	while(curr_entry){
 		if(curr_entry && __of1x_check_priority_cookie_trie(entry, curr_entry,
 										true,
 										false)){
 			ROFL_PIPELINE_DEBUG("[flowmod-modify(%p)][trie] Existing entry (%p) will be updated with (%p)\n", entry, curr_entry, entry);
 
-			next->entry = entry;
-			//FIXME: copy stats
-			//FIXME: remove curr_entry and update
+			//Add the new entry
+			__of1x_add_ll_prio_trie(&trie->entry, entry);
 
-			if(!curr_entry->next)
-				goto ADD_END;
+			//Remove the previous
+			__of1x_remove_ll_prio_trie(&trie->entry, curr_entry);
+
+			//Mark the entry to be removed
+			to_be_removed = curr_entry;
+
+			//Update stats
+			if(!reset_counts){
+				//Copy stats atomically
+				//FIXME: XXX
+			}
+
+			goto ADD_END;
 		}
+		curr_entry = curr_entry->next;
 	}
 
 	//Point to the root of the tree
@@ -567,6 +631,11 @@ rofl_of1x_fm_result_t of1x_add_flow_entry_trie(of1x_flow_table_t *const table,
 
 ADD_END:
 	platform_mutex_unlock(table->mutex);
+
+	if(to_be_removed){
+		//TODO FIXME XXX remove entry
+	}
+
 	return res;
 }
 
