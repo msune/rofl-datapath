@@ -27,6 +27,7 @@ rofl_result_t of1x_init_trie(struct of1x_flow_table *const table){
 	of1x_trie_t* trie = (of1x_trie_t*)table->matching_aux[0];
 
 	//Set values
+	trie->entry = NULL;
 	trie->root = NULL;
 
 	return ROFL_SUCCESS;
@@ -35,8 +36,18 @@ rofl_result_t of1x_init_trie(struct of1x_flow_table *const table){
 //Recursively destroy leafs
 static void of1x_destroy_leaf(struct of1x_trie_leaf* leaf){
 
+	of1x_flow_entry_t *entry, *tmp;
+
 	if(!leaf)
 		return;
+
+	//Destroy entry/ies
+	entry = leaf->entry;
+	while(entry){
+		tmp = entry->next;
+		of1x_destroy_flow_entry(entry);
+		entry = tmp;
+	}
 
 	//Destroy inner leafs
 	of1x_destroy_leaf(leaf->inner);
@@ -50,10 +61,19 @@ static void of1x_destroy_leaf(struct of1x_trie_leaf* leaf){
 
 rofl_result_t of1x_destroy_trie(struct of1x_flow_table *const table){
 
+	of1x_flow_entry_t *entry, *tmp;
 	of1x_trie_t* trie = (of1x_trie_t*)table->matching_aux[0];
 
 	//Free all the leafs
 	of1x_destroy_leaf(trie->root);
+
+	//Destroy entry/ies
+	entry = trie->entry;
+	while(entry){
+		tmp = entry->next;
+		of1x_destroy_flow_entry(entry);
+		entry = tmp;
+	}
 
 	//Free main leaf structure
 	platform_free_shared(table->matching_aux[0]);
@@ -82,13 +102,16 @@ void __of1x_add_ll_prio_trie(of1x_flow_entry_t** head, of1x_flow_entry_t* entry)
 
 	//Loop over the entries and find the right position
 	tmp = *head;
-	while(1){
+	while(tmp){
 		//Insert before tmp
 		if(tmp->priority < entry->priority){
-			tmp->prev->next = entry;
-			tmp->prev = entry;
 			entry->prev = tmp->prev;
 			entry->next = tmp;
+			if(tmp->prev)
+				tmp->prev->next = entry;
+			else
+				*head = entry;
+			tmp->prev = entry;
 			return;
 		}
 		//If it is the last one insert in the tail
@@ -543,11 +566,10 @@ rofl_of1x_fm_result_t of1x_add_flow_entry_trie(of1x_flow_table_t *const table,
 								of1x_flow_entry_t *const entry,
 								bool check_overlap,
 								bool reset_counts){
-
 	rofl_of1x_fm_result_t res = ROFL_OF1X_FM_SUCCESS;
 	of1x_trie_t* trie = (of1x_trie_t*)table->matching_aux[0];
 	struct of1x_trie_leaf *prev, *next;
-	of1x_flow_entry_t* curr_entry, *to_be_removed=NULL;
+	of1x_flow_entry_t *curr_entry, *to_be_removed=NULL;
 
 	//Allow single add/remove operation over the table
 	platform_mutex_lock(table->mutex);
@@ -591,12 +613,23 @@ rofl_of1x_fm_result_t of1x_add_flow_entry_trie(of1x_flow_table_t *const table,
 	prev = NULL;
 	next = trie->root;
 
-	//Check existent (they can only be in this position of the trie,
-	//but there can be multiple ones chained under "next" pointer (different priorities)
-	curr_entry = of1x_find_reen_trie(&entry->matches, &prev, &next,
+	//No match entries
+	curr_entry = trie->entry;
+
+	do{
+		//Get next overlapping
+		if(!curr_entry){
+			//Check existent (they can only be in this position of the trie,
+			//but there can be multiple ones chained under "next" pointer (different priorities)
+			curr_entry = of1x_find_reen_trie(&entry->matches, &prev,
+									&next,
 									true,
 									true);
-	while(curr_entry){
+			//If no more entries are found, we are done
+			if(!curr_entry)
+				break;
+		}
+
 		if(curr_entry && __of1x_check_priority_cookie_trie(entry, curr_entry,
 										true,
 										false)){
@@ -613,14 +646,24 @@ rofl_of1x_fm_result_t of1x_add_flow_entry_trie(of1x_flow_table_t *const table,
 
 			//Update stats
 			if(!reset_counts){
-				//Copy stats atomically
-				//FIXME: XXX
+				__of1x_stats_flow_tid_t c;
+
+#ifdef ROFL_PIPELINE_LOCKLESS
+				tid_wait_all_not_present(&table->tid_presence_mask);
+#endif
+
+				//Consolidate stats
+				__of1x_stats_flow_consolidate(&curr_entry->stats, &c);
+
+				//Add; note that position 0 is locked by us
+				curr_entry->stats.s.__internal[0].packet_count += c.packet_count;
+				curr_entry->stats.s.__internal[0].byte_count += c.byte_count;
 			}
 
 			goto ADD_END;
 		}
 		curr_entry = curr_entry->next;
-	}
+	}while(1);
 
 	//Point to the root of the tree
 	prev = NULL;
@@ -628,13 +671,17 @@ rofl_of1x_fm_result_t of1x_add_flow_entry_trie(of1x_flow_table_t *const table,
 
 	//If we got in here, we have to add the entry (no existing entries)
 	res = __of1x_add_leafs_trie(trie, entry);
+	table->num_of_entries++;
 
 ADD_END:
-	platform_mutex_unlock(table->mutex);
-
 	if(to_be_removed){
-		//TODO FIXME XXX remove entry
+#ifdef ROFL_PIPELINE_LOCKLESS
+		tid_wait_all_not_present(&table->tid_presence_mask);
+#endif
+		of1x_destroy_flow_entry(to_be_removed);
 	}
+
+	platform_mutex_unlock(table->mutex);
 
 	return res;
 }
