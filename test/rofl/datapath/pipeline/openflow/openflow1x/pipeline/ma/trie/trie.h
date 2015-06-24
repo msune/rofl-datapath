@@ -20,7 +20,7 @@ int tear_down(void);
 
 /* Test cases */
 void test_install_empty_flowmods(void);
-void test_install_overlapping_specific(void);
+void test_install_flowmods_nomask(void);
 void test_multiple_masks(void);
 
 
