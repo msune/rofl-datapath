@@ -393,7 +393,7 @@ static rofl_of1x_fm_result_t __of1x_insert_intermediate_leaf_trie(of1x_trie_t* t
 							int m_it,
 							of1x_flow_entry_t *const entry){
 	of1x_trie_leaf_t *intermediate;
-	struct of1x_trie_leaf* new_branch;
+	struct of1x_trie_leaf* new_branch=NULL;
 	of1x_match_t* m;
 
 	m = entry->matches.m_array[m_it];
@@ -405,6 +405,7 @@ static rofl_of1x_fm_result_t __of1x_insert_intermediate_leaf_trie(of1x_trie_t* t
 		assert(0);
 		return ROFL_OF1X_FM_FAILURE;
 	}
+	memset(intermediate, 0, sizeof(of1x_trie_leaf_t));
 
 	//Get the common part
 	if(!__of1x_get_alike_match(&l->match, m, &intermediate->match)){
@@ -413,11 +414,14 @@ static rofl_of1x_fm_result_t __of1x_insert_intermediate_leaf_trie(of1x_trie_t* t
 		return ROFL_OF1X_FM_FAILURE;
 	}
 
-	//Get the new branch
-	new_branch = __of1x_create_new_branch_trie(m_it, entry);
-
-	if(!new_branch)
-		return ROFL_OF1X_FM_FAILURE;
+	//Get the new branch if there are other matches and m is complete
+	if(__of1x_equal_matches(m, &intermediate->match) == false){
+		new_branch = __of1x_create_new_branch_trie(m_it, entry);
+		if(!new_branch)
+			return ROFL_OF1X_FM_FAILURE;
+	}else{
+		intermediate->entry = entry;
+	}
 
 
 	/*
@@ -426,13 +430,14 @@ static rofl_of1x_fm_result_t __of1x_insert_intermediate_leaf_trie(of1x_trie_t* t
 
 	//Intermediate leaf
 	intermediate->inner = l;
-	intermediate->prev = intermediate->next = NULL;
 	intermediate->parent = l->parent;
 
 	//new branch
-	new_branch->parent = intermediate;
-	new_branch->prev = l;
-	new_branch->next = NULL;
+	if(new_branch){
+		new_branch->parent = intermediate;
+		new_branch->prev = l;
+		new_branch->next = NULL;
+	}
 
 	//Previous leaf, now child
 	l->parent = intermediate;
@@ -552,7 +557,8 @@ rofl_of1x_fm_result_t __of1x_add_leafs_trie(of1x_trie_t* trie,
 
 		//If it is equal, then we have to move to the next match
 		//or stop here if it is the last
-		if(__of1x_equal_matches(&l->match, &tmp)){
+		if(__of1x_get_alike_match(m, &l->match, &tmp) &&
+				__of1x_equal_matches(&l->match, &tmp)){
 			//Increment match
 			if(__of1x_get_next_match(entry, m_it) == -1){
 				//No more matches; this is the insertion point
