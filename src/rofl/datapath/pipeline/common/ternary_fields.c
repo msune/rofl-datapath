@@ -15,7 +15,7 @@ void __init_utern8(utern_t* tern, uint8_t value, uint8_t mask){
 		return;
 
 	tern->type = UTERN8_T;
-	tern->value.u8 = value;
+	tern->value.u8 = value&mask;
 	tern->mask.u8 = mask;
 }
 void __init_utern16(utern_t* tern, uint16_t value, uint16_t mask){
@@ -23,7 +23,7 @@ void __init_utern16(utern_t* tern, uint16_t value, uint16_t mask){
 		return;
 
 	tern->type = UTERN16_T;
-	tern->value.u16 = value;
+	tern->value.u16 = value&mask;
 	tern->mask.u16 = mask;
 }
 void __init_utern32(utern_t* tern, uint32_t value, uint32_t mask){
@@ -31,7 +31,7 @@ void __init_utern32(utern_t* tern, uint32_t value, uint32_t mask){
 		return;
 
 	tern->type = UTERN32_T;
-	tern->value.u32 = value;
+	tern->value.u32 = value&mask;
 	tern->mask.u32 = mask;
 }
 void __init_utern64(utern_t* tern, uint64_t value, uint64_t mask){
@@ -39,16 +39,25 @@ void __init_utern64(utern_t* tern, uint64_t value, uint64_t mask){
 		return;
 
 	tern->type = UTERN64_T;
-	tern->value.u64 = value;
+	tern->value.u64 = value&mask;
 	tern->mask.u64 = mask;
 }
 void __init_utern128(utern_t* tern, uint128__t value, uint128__t mask){ //uint128_t funny!
+
+	w128_t *tmp, *tmp2;
+
 	if(!tern)
 		return;
 
 	tern->type = UTERN128_T;
 	tern->value.u128 = value;
 	tern->mask.u128 = mask;
+
+	//Mask value
+	tmp = (w128_t*)&tern->value.u128;
+	tmp2 = (w128_t*)&tern->mask.u128;
+	tmp->hi = tmp->hi & tmp2->hi;
+	tmp->lo = tmp->lo & tmp2->lo;
 }
 
 /*
