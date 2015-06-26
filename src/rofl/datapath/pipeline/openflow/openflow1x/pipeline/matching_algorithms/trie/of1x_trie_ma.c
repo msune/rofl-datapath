@@ -649,7 +649,10 @@ rofl_of1x_fm_result_t of1x_add_flow_entry_trie(of1x_flow_table_t *const table,
 	next = trie->root;
 
 	//No match entries
-	curr_entry = trie->entry;
+	if(!entry->matches.head)
+		curr_entry = trie->entry;
+	else
+		curr_entry = NULL;
 
 	do{
 		//Get next exact

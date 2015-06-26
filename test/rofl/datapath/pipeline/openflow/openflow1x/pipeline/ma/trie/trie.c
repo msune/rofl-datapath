@@ -148,6 +148,8 @@ void test_install_flowmods_nomask(){
 
 	of1x_flow_entry_t *entry, *tmp;
 
+	/* ----- 1 ------ */
+
 	//Create a flowmod with a single match
 	entry = of1x_init_flow_entry(false);
 	entry->priority=999;
@@ -160,6 +162,14 @@ void test_install_flowmods_nomask(){
 	CU_ASSERT(of1x_add_flow_entry_table(&sw->pipeline, 0, &entry, false,false) == ROFL_OF1X_FM_SUCCESS);
 	CU_ASSERT(entry == NULL);
 	CU_ASSERT(table->num_of_entries == 5);
+
+
+	//
+	// Expected tree structure:
+	//
+	// - m:192.168.0.1/32 entry:1 imp:999
+
+
 	CU_ASSERT(trie->root != NULL);
 	CU_ASSERT(trie->root->parent == NULL);
 	CU_ASSERT(trie->root->inner == NULL);
@@ -169,6 +179,8 @@ void test_install_flowmods_nomask(){
 	CU_ASSERT(trie->root->match.__tern.value.u32 == HTONB32(0xC0A80001));
 	CU_ASSERT(trie->root->match.__tern.mask.u32 == HTONB32(0xFFFFFFFF));
 	CU_ASSERT(trie->root->inner_max_priority = 999);
+
+	/* ----- 2 ------ */
 
 	//Add a flowmod that shares most of it (except two bits)
 	//Creates an intermediate leaf
@@ -182,6 +194,14 @@ void test_install_flowmods_nomask(){
 	CU_ASSERT(of1x_add_flow_entry_table(&sw->pipeline, 0, &entry, false,false) == ROFL_OF1X_FM_SUCCESS);
 	CU_ASSERT(entry == NULL);
 	CU_ASSERT(table->num_of_entries == 6);
+
+	//
+	// Expected tree structure:
+	//
+	// -m:192.168.0.0/30 entry:NULL imp:1999
+	// -- m:192.168.0.2/32 entry:2 imp:1999
+	// -- m:192.168.0.1/32 entry:1 imp:999
+
 	CU_ASSERT(trie->root != NULL);
 	CU_ASSERT(trie->root->parent == NULL);
 	CU_ASSERT(trie->root->inner != NULL);
@@ -191,8 +211,12 @@ void test_install_flowmods_nomask(){
 	CU_ASSERT(trie->root->match.__tern.mask.u32 == HTONB32(0xFFFFFFFC));
 	CU_ASSERT(trie->root->inner_max_priority = 1999);
 	CU_ASSERT(trie->root->inner->entry != NULL);
+	CU_ASSERT(trie->root->inner->inner_max_priority = 1999);
+	CU_ASSERT(trie->root->inner->next->inner_max_priority = 999);
 	CU_ASSERT(trie->root->inner->next->entry != NULL);
 	CU_ASSERT(trie->root->inner->next->next == NULL);
+
+	/* ----- 3 ------ */
 
 	//Try overlapping
 	entry = of1x_init_flow_entry(false);
@@ -202,14 +226,54 @@ void test_install_flowmods_nomask(){
 	CU_ASSERT(of1x_add_match_to_entry(entry,of1x_init_ip4_src_match(0xC0A80002, 0xFFFFFF00)) == ROFL_SUCCESS);
 	entry->priority=1999;
 	CU_ASSERT(of1x_add_flow_entry_table(&sw->pipeline, 0, &entry, true,false) == ROFL_OF1X_FM_OVERLAP);
-	entry->priority=1999;
+
+
+	//
+	// Expected tree structure:
+	//
+	// -m:192.168.0.0/24 entry:3 imp: 1999
+	// --m:192.168.0.0/30 entry:NULL imp:1999
+	// --- m:192.168.0.2/32 entry:2 imp:1999
+	// --- m:192.168.0.1/32 entry:1 imp:999
+
+	entry->priority=99; //deliverately clashing with empty entry
 	tmp = entry;
 	CU_ASSERT(of1x_add_flow_entry_table(&sw->pipeline, 0, &entry, false,false) == ROFL_OF1X_FM_SUCCESS);
+	CU_ASSERT(entry == NULL);
+
+	//Check 3
 	CU_ASSERT(table->num_of_entries == 7);
+	CU_ASSERT(trie->root->inner_max_priority = 1999);
 	CU_ASSERT(trie->root->match.__tern.value.u32 == HTONB32(0xC0A80000));
 	CU_ASSERT(trie->root->match.__tern.mask.u32 == HTONB32(0xFFFFFF00));
 	CU_ASSERT(trie->root->entry == tmp);
+	CU_ASSERT(trie->root->entry->priority == 99);
+	CU_ASSERT(trie->root->next == NULL);
 
+	//Check intermediate
+	CU_ASSERT(trie->root->inner != NULL);
+	CU_ASSERT(trie->root->inner->inner_max_priority = 1999);
+	CU_ASSERT(trie->root->inner->match.__tern.value.u32 == HTONB32(0xC0A80000));
+	CU_ASSERT(trie->root->inner->match.__tern.mask.u32 == HTONB32(0xFFFFFFFC));
+	CU_ASSERT(trie->root->inner->entry == NULL);
+
+	//Check 1
+	CU_ASSERT(trie->root->inner->inner->match.__tern.value.u32 == HTONB32(0xC0A80001));
+	CU_ASSERT(trie->root->inner->inner->match.__tern.mask.u32 == HTONB32(0xFFFFFFFF));
+	CU_ASSERT(trie->root->inner->inner->entry != NULL);
+	CU_ASSERT(trie->root->inner->inner->entry->priority = 999);
+	CU_ASSERT(trie->root->inner->inner->prev == NULL);
+	CU_ASSERT(trie->root->inner->inner->parent == trie->root->inner);
+
+	//Check 2
+	CU_ASSERT(trie->root->inner->inner->next->match.__tern.value.u32 == HTONB32(0xC0A80002));
+	CU_ASSERT(trie->root->inner->inner->next->inner_max_priority = 999);
+	CU_ASSERT(trie->root->inner->inner->next->inner_max_priority = 999);
+	CU_ASSERT(trie->root->inner->inner->next->entry != NULL);
+	CU_ASSERT(trie->root->inner->inner->next->entry->priority = 1999);
+	CU_ASSERT(trie->root->inner->inner->next->prev == trie->root->inner->inner);
+	CU_ASSERT(trie->root->inner->inner->next->next == NULL);
+	CU_ASSERT(trie->root->inner->inner->parent == trie->root->inner);
 
 }
 
