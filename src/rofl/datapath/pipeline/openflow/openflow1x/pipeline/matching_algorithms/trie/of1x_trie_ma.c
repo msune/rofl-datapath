@@ -348,6 +348,7 @@ static rofl_of1x_fm_result_t __of1x_insert_next_leaf_trie(struct of1x_trie_leaf*
 							of1x_flow_entry_t *const entry){
 
 	struct of1x_trie_leaf* new_branch;
+	struct of1x_trie_leaf* l_poi;
 
 	//Get the new branch
 	new_branch = __of1x_create_new_branch_trie(m_it, entry);
@@ -369,6 +370,7 @@ static rofl_of1x_fm_result_t __of1x_insert_next_leaf_trie(struct of1x_trie_leaf*
 	}
 
 	//Then go recursively down
+	l_poi = l;
 	l = l->parent;
 	while(l){
 		if(l->inner_max_priority < entry->priority)
@@ -380,7 +382,7 @@ static rofl_of1x_fm_result_t __of1x_insert_next_leaf_trie(struct of1x_trie_leaf*
 
 	//We append as next
 	entry->prev = entry->next = NULL;
-	l->next = new_branch;
+	l_poi->next = new_branch;
 
 	return ROFL_OF1X_FM_SUCCESS;
 }
@@ -504,7 +506,7 @@ rofl_of1x_fm_result_t __of1x_add_leafs_trie(of1x_trie_t* trie,
 
 	int m_it;
 	struct of1x_trie_leaf *l;
-	of1x_match_t* m;
+	of1x_match_t *m, tmp;
 	rofl_of1x_fm_result_t res = ROFL_OF1X_FM_SUCCESS;
 
 	//Determine entry's first match
@@ -532,11 +534,12 @@ rofl_of1x_fm_result_t __of1x_add_leafs_trie(of1x_trie_t* trie,
 	//Determine the point of insertion
 	while(l){
 		//Check if they share something
-		if(!__of1x_get_alike_match(m, &l->match, NULL)){
+		if(__of1x_is_submatch(m, &l->match) == false &&
+			__of1x_get_alike_match(m, &l->match, &tmp) == false){
 			if(!l->next){
 				//This is the point of insertion
 				res = __of1x_insert_next_leaf_trie(l, m_it, entry);
-				break;
+				goto ADD_LEAFS_END;
 			}
 
 			l = l->next;
@@ -547,25 +550,22 @@ rofl_of1x_fm_result_t __of1x_add_leafs_trie(of1x_trie_t* trie,
 		* We have to follow this branch
 		*/
 
-		//If the leaf is not a submatch, then
-		if(!__of1x_is_submatch(m, &l->match)){
-			//This is the point of insertion
-			res = __of1x_insert_intermediate_leaf_trie(trie, l, m_it,
-										entry);
-			goto ADD_LEAFS_END;
-		}
-
 		//If it is equal, then we have to move to the next match
 		//or stop here if it is the last
-		if(__of1x_equal_matches(m, &l->match)){
+		if(__of1x_equal_matches(&l->match, &tmp)){
 			//Increment match
 			if(__of1x_get_next_match(entry, m_it) == -1){
 				//No more matches; this is the insertion point
 				res = __of1x_insert_terminal_leaf_trie(l, m_it, entry);
-				break;
+				goto ADD_LEAFS_END;
 			}
 			m_it = __of1x_get_next_match(entry, m_it);
 			m = entry->matches.m_array[m_it];
+		}else{
+			//This is the point of insertion
+			res = __of1x_insert_intermediate_leaf_trie(trie, l, m_it,
+										entry);
+			goto ADD_LEAFS_END;
 		}
 
 		//We have to go deeper

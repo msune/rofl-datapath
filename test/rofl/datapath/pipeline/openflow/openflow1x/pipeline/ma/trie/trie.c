@@ -203,8 +203,12 @@ void test_install_flowmods_nomask(){
 	entry->priority=1999;
 	CU_ASSERT(of1x_add_flow_entry_table(&sw->pipeline, 0, &entry, true,false) == ROFL_OF1X_FM_OVERLAP);
 	entry->priority=1999;
-	//CU_ASSERT(of1x_add_flow_entry_table(&sw->pipeline, 0, &entry, false,false) == ROFL_OF1X_FM_SUCCESS);
-	//CU_ASSERT(table->num_of_entries == 7);
+	tmp = entry;
+	CU_ASSERT(of1x_add_flow_entry_table(&sw->pipeline, 0, &entry, false,false) == ROFL_OF1X_FM_SUCCESS);
+	CU_ASSERT(table->num_of_entries == 7);
+	CU_ASSERT(trie->root->match.__tern.value.u32 == HTONB32(0xC0A80000));
+	CU_ASSERT(trie->root->match.__tern.mask.u32 == HTONB32(0xFFFFFF00));
+	CU_ASSERT(trie->root->entry == tmp);
 
 
 }
