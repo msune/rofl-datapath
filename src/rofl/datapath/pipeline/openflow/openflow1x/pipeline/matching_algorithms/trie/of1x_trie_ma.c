@@ -414,8 +414,12 @@ static rofl_of1x_fm_result_t __of1x_insert_intermediate_leaf_trie(of1x_trie_t* t
 		return ROFL_OF1X_FM_FAILURE;
 	}
 
-	//Get the new branch if there are other matches and m is complete
-	if(__of1x_equal_matches(m, &intermediate->match) == false){
+	//If they are equal, get the next match
+	if(__of1x_equal_matches(m, &intermediate->match) == true)
+		m_it = __of1x_get_next_match(entry, m_it);
+
+	//Get the new branch if there are other matches
+	if(m_it != -1){
 		new_branch = __of1x_create_new_branch_trie(m_it, entry);
 		if(!new_branch)
 			return ROFL_OF1X_FM_FAILURE;
@@ -431,6 +435,8 @@ static rofl_of1x_fm_result_t __of1x_insert_intermediate_leaf_trie(of1x_trie_t* t
 	//Intermediate leaf
 	intermediate->inner = l;
 	intermediate->parent = l->parent;
+	intermediate->prev = l->prev;
+	intermediate->next = l->next;
 
 	//new branch
 	if(new_branch){
@@ -439,7 +445,7 @@ static rofl_of1x_fm_result_t __of1x_insert_intermediate_leaf_trie(of1x_trie_t* t
 		new_branch->next = NULL;
 	}
 
-	//Previous leaf, now child
+	//Previous leaf now child
 	l->parent = intermediate;
 	l->next = new_branch;
 
@@ -467,11 +473,14 @@ static rofl_of1x_fm_result_t __of1x_insert_intermediate_leaf_trie(of1x_trie_t* t
 	}
 
 	//Now insert
-	if(intermediate->parent)
-		intermediate->parent->inner = intermediate;
-	else
+	if(intermediate->parent){
+		if(intermediate->prev)
+			intermediate->prev->next = intermediate;
+		else
+			intermediate->parent->inner = intermediate;
+	}else{
 		trie->root = intermediate;
-
+	}
 	return ROFL_OF1X_FM_SUCCESS;
 }
 
@@ -539,43 +548,54 @@ rofl_of1x_fm_result_t __of1x_add_leafs_trie(of1x_trie_t* trie,
 	//Determine the point of insertion
 	while(l){
 		//Check if they share something
-		if(__of1x_is_submatch(m, &l->match) == false &&
-			__of1x_get_alike_match(m, &l->match, &tmp) == false){
-			if(!l->next){
-				//This is the point of insertion
-				res = __of1x_insert_next_leaf_trie(l, m_it, entry);
-				goto ADD_LEAFS_END;
-			}
+		if(__of1x_get_alike_match(m, &l->match, &tmp) == false)
+			goto ADD_LEAFS_NEXT;
 
-			l = l->next;
-			continue;
-		}
+		//
+		// They do share something
+		// but is it already what parent was sharing
+		//
+		if(l->parent && __of1x_equal_matches(&l->parent->match, &tmp))
+			goto ADD_LEAFS_NEXT;
 
-		/*
-		* We have to follow this branch
-		*/
+		//If what they sahre is equal to the leaf match
+		//then we have to go deeper
+		if(__of1x_equal_matches(&l->match, &tmp)){
+			//Check if the they m == leaf
+			if(__of1x_equal_matches(&l->match, m) == false)
+				goto ADD_LEAFS_INNER;
 
-		//If it is equal, then we have to move to the next match
-		//or stop here if it is the last
-		if(__of1x_get_alike_match(m, &l->match, &tmp) &&
-				__of1x_equal_matches(&l->match, &tmp)){
 			//Increment match
 			if(__of1x_get_next_match(entry, m_it) == -1){
 				//No more matches; this is the insertion point
 				res = __of1x_insert_terminal_leaf_trie(l, m_it, entry);
 				goto ADD_LEAFS_END;
 			}
+
+			//Go to next match
 			m_it = __of1x_get_next_match(entry, m_it);
 			m = entry->matches.m_array[m_it];
+
+			//Go deeper
+			goto ADD_LEAFS_INNER;
 		}else{
-			//This is the point of insertion
+			//leaf an m share something; this is the point of insertion
 			res = __of1x_insert_intermediate_leaf_trie(trie, l, m_it,
 										entry);
 			goto ADD_LEAFS_END;
 		}
 
-		//We have to go deeper
+ADD_LEAFS_INNER:
 		l = l->inner;
+		continue;
+
+ADD_LEAFS_NEXT:
+		if(!l->next){
+			//This is the point of insertion
+			res = __of1x_insert_next_leaf_trie(l, m_it, entry);
+			goto ADD_LEAFS_END;
+		}
+		l = l->next;
 	}
 
 	//We shall never reach this point
@@ -772,7 +792,65 @@ of1x_flow_entry_t* of1x_find_entry_using_group_trie(of1x_flow_table_t *const tab
 	return NULL;
 }
 
+#define INDENT "  "
+
+static void of1x_dump_leaf_trie(struct of1x_trie_leaf *l, int indent, bool raw_nbo){
+
+	int i;
+
+	if(!l)
+		return;
+
+	ROFL_PIPELINE_INFO("[trie]");
+
+	for(i = indent; i >= 0; i--)
+		ROFL_PIPELINE_INFO_NO_PREFIX(INDENT);
+
+	ROFL_PIPELINE_INFO_NO_PREFIX("l:");
+	__of1x_dump_matches(&l->match, raw_nbo);
+	ROFL_PIPELINE_INFO_NO_PREFIX(" imp: %u ",l->inner_max_priority);
+
+	if(l->entry)
+		ROFL_PIPELINE_INFO_NO_PREFIX("* p: %u (%p)", l->entry->priority, l->entry);
+	ROFL_PIPELINE_INFO_NO_PREFIX("\n");
+
+	//Inner
+	if(l->inner)
+		of1x_dump_leaf_trie(l->inner, indent+1, raw_nbo);
+
+	//Next
+	if(l->next)
+		of1x_dump_leaf_trie(l->next, indent, raw_nbo);
+}
+
 void of1x_dump_trie(struct of1x_flow_table *const table, bool raw_nbo){
+
+	of1x_trie_t* trie = (of1x_trie_t*)table->matching_aux[0];
+	of1x_flow_entry_t* it;
+
+	__of1x_stats_table_tid_t c;
+
+	//Consolidate stats
+	__of1x_stats_table_consolidate(&table->stats, &c);
+
+	ROFL_PIPELINE_INFO("[trie]\n");
+	ROFL_PIPELINE_INFO("[trie] Dumping table # %u (%p). Default action: %s, num. of entries: %d, ma: %u statistics {looked up: %u, matched: %u}\n", table->number, table, __of1x_flow_table_miss_config_str[table->default_action],table->num_of_entries, table->matching_algorithm,  c.lookup_count, c.matched_count);
+
+	ROFL_PIPELINE_INFO("[trie]\n");
+	ROFL_PIPELINE_INFO("[trie] Empty match entries:\n");
+
+	//Empty entry
+	it = trie->entry;
+	while(it){
+		ROFL_PIPELINE_INFO("[trie]"INDENT" * p: %u (%p)\n", it->priority, it);
+		it = it->next;
+	}
+	if(trie->entry)
+		ROFL_PIPELINE_INFO("[trie]\n");
+	ROFL_PIPELINE_INFO("[trie] Match entries:\n");
+
+	//Start the recursion
+	of1x_dump_leaf_trie(trie->root, 0, raw_nbo);
 
 }
 

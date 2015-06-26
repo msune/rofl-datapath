@@ -164,6 +164,8 @@ void test_install_flowmods_nomask(){
 	CU_ASSERT(table->num_of_entries == 5);
 
 
+	of1x_full_dump_switch(sw, false);
+
 	//
 	// Expected tree structure:
 	//
@@ -194,6 +196,8 @@ void test_install_flowmods_nomask(){
 	CU_ASSERT(of1x_add_flow_entry_table(&sw->pipeline, 0, &entry, false,false) == ROFL_OF1X_FM_SUCCESS);
 	CU_ASSERT(entry == NULL);
 	CU_ASSERT(table->num_of_entries == 6);
+
+	of1x_full_dump_switch(sw, false);
 
 	//
 	// Expected tree structure:
@@ -241,6 +245,8 @@ void test_install_flowmods_nomask(){
 	CU_ASSERT(of1x_add_flow_entry_table(&sw->pipeline, 0, &entry, false,false) == ROFL_OF1X_FM_SUCCESS);
 	CU_ASSERT(entry == NULL);
 
+	of1x_full_dump_switch(sw, false);
+
 	//Check 3
 	CU_ASSERT(table->num_of_entries == 7);
 	CU_ASSERT(trie->root->inner_max_priority = 1999);
@@ -260,6 +266,7 @@ void test_install_flowmods_nomask(){
 	//Check 1
 	CU_ASSERT(trie->root->inner->inner->match.__tern.value.u32 == HTONB32(0xC0A80001));
 	CU_ASSERT(trie->root->inner->inner->match.__tern.mask.u32 == HTONB32(0xFFFFFFFF));
+	CU_ASSERT(trie->root->inner->inner->inner == NULL);
 	CU_ASSERT(trie->root->inner->inner->entry != NULL);
 	CU_ASSERT(trie->root->inner->inner->entry->priority = 999);
 	CU_ASSERT(trie->root->inner->inner->prev == NULL);
@@ -274,6 +281,96 @@ void test_install_flowmods_nomask(){
 	CU_ASSERT(trie->root->inner->inner->next->prev == trie->root->inner->inner);
 	CU_ASSERT(trie->root->inner->inner->next->next == NULL);
 	CU_ASSERT(trie->root->inner->inner->parent == trie->root->inner);
+
+	/* ----- 4 ------ */
+
+	//Try overlapping
+	entry = of1x_init_flow_entry(false);
+	CU_ASSERT(entry != NULL);
+
+	//192.168.0.3
+	CU_ASSERT(of1x_add_match_to_entry(entry,of1x_init_ip4_src_match(0xC0A80003, 0xFFFFFFFF)) == ROFL_SUCCESS);
+	//192.168.0.1
+	CU_ASSERT(of1x_add_match_to_entry(entry,of1x_init_ip4_dst_match(0xC0A80001, 0xFFFFFFFF)) == ROFL_SUCCESS);
+	entry->priority=99; //explicitely use a clashing priority
+	CU_ASSERT(of1x_add_flow_entry_table(&sw->pipeline, 0, &entry, true,false) == ROFL_OF1X_FM_OVERLAP);
+	entry->priority=3999;
+	CU_ASSERT(of1x_add_flow_entry_table(&sw->pipeline, 0, &entry, false,false) == ROFL_OF1X_FM_SUCCESS);
+
+	//
+	// Expected tree structure:
+	//
+	/*
+		Empty match entries:
+		  * p: 110 (0x664b70)
+		  * p: 107 (0x665150)
+		  * p: 100 (0x663fb0)
+		  * p: 99 (0x665730)
+		[rofl-pipeline] [trie]
+		Match entries:
+		 l:[IP4_SRC:0xc0a80000|0xffffff00],  imp: 3999 * p: 99 (0x666560)
+		   l:[IP4_SRC:0xc0a80000|0xfffffffc],  imp: 3999 
+		     l:[IP4_SRC:0xc0a80001|0xffffffff],  imp: 1999 * p: 999 (0x664590)
+		     l:[IP4_SRC:0xc0a80002|0xfffffffe],  imp: 3999 
+		       l:[IP4_SRC:0xc0a80002|0xffffffff],  imp: 999 * p: 1999 (0x665e00)
+		       l:[IP4_SRC:0xc0a80003|0xffffffff],  imp: 3999 
+			 l:[IP4_DST:0xc0a80001|0xffffffff],  imp: 0 * p: 3999 (0x666c30)
+ 	*/
+
+	of1x_full_dump_switch(sw, false);
+
+	//Check 3
+	CU_ASSERT(table->num_of_entries == 8);
+	CU_ASSERT(trie->root->inner_max_priority = 3999);
+	CU_ASSERT(trie->root->match.__tern.value.u32 == HTONB32(0xC0A80000));
+	CU_ASSERT(trie->root->match.__tern.mask.u32 == HTONB32(0xFFFFFF00));
+	CU_ASSERT(trie->root->entry == tmp);
+	CU_ASSERT(trie->root->entry->priority == 99);
+	CU_ASSERT(trie->root->next == NULL);
+
+	//Check intermediate
+	CU_ASSERT(trie->root->inner != NULL);
+	CU_ASSERT(trie->root->inner->inner_max_priority = 3999);
+	CU_ASSERT(trie->root->inner->match.__tern.value.u32 == HTONB32(0xC0A80000));
+	CU_ASSERT(trie->root->inner->match.__tern.mask.u32 == HTONB32(0xFFFFFFFC));
+	CU_ASSERT(trie->root->inner->entry == NULL);
+	CU_ASSERT(trie->root->next == NULL);
+
+	//Check 1
+	CU_ASSERT(trie->root->inner->inner->match.__tern.value.u32 == HTONB32(0xC0A80001));
+	CU_ASSERT(trie->root->inner->inner->match.__tern.mask.u32 == HTONB32(0xFFFFFFFF));
+	CU_ASSERT(trie->root->inner->inner->entry != NULL);
+	CU_ASSERT(trie->root->inner->inner->inner == NULL);
+
+	//Check intermediate 2
+	CU_ASSERT(trie->root->inner->inner->next->match.__tern.value.u32 == HTONB32(0xC0A80002));
+	CU_ASSERT(trie->root->inner->inner->next->match.__tern.mask.u32 == HTONB32(0xFFFFFFFE));
+	CU_ASSERT(trie->root->inner->inner->next->inner_max_priority = 3999);
+	CU_ASSERT(trie->root->inner->inner->next->entry == NULL);
+	CU_ASSERT(trie->root->next == NULL);
+
+	//Check 2
+	CU_ASSERT(trie->root->inner->inner->next->inner->match.__tern.value.u32 == HTONB32(0xC0A80002));
+	CU_ASSERT(trie->root->inner->inner->next->inner->match.__tern.mask.u32 == HTONB32(0xFFFFFFFF));
+	CU_ASSERT(trie->root->inner->inner->next->inner->entry != NULL);
+	CU_ASSERT(trie->root->inner->inner->next->inner->inner == NULL);
+	CU_ASSERT(trie->root->inner->inner->next->inner->next != NULL);
+	CU_ASSERT(trie->root->inner->inner->next->inner->entry->priority == 1999);
+	CU_ASSERT(trie->root->inner->inner->next->inner_max_priority = 3999);
+
+	//Check 4
+	CU_ASSERT(trie->root->inner->inner->next->inner->next->match.__tern.value.u32 == HTONB32(0xC0A80003));
+	CU_ASSERT(trie->root->inner->inner->next->inner->next->match.__tern.mask.u32 == HTONB32(0xFFFFFFFF));
+	CU_ASSERT(trie->root->inner->inner->next->inner->next->entry == NULL);
+	CU_ASSERT(trie->root->inner->inner->next->inner->next->inner != NULL);
+	CU_ASSERT(trie->root->inner->inner->next->inner->next->inner_max_priority = 3999);
+	CU_ASSERT(trie->root->inner->inner->next->inner->next->inner->match.__tern.value.u32 == HTONB32(0xC0A80001));
+	CU_ASSERT(trie->root->inner->inner->next->inner->next->inner->match.__tern.mask.u32 == HTONB32(0xFFFFFFFF));
+	CU_ASSERT(trie->root->inner->inner->next->inner->next->inner->entry != NULL);
+	CU_ASSERT(trie->root->inner->inner->next->inner->next->inner->entry->priority = 3999);
+
+	/* ----- 5 ------ */
+	//TODO
 
 }
 
