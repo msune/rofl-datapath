@@ -20,8 +20,7 @@ int tear_down(void);
 
 /* Test cases */
 void test_install_empty_flowmods(void);
-void test_install_flowmods_nomask(void);
-void test_multiple_masks(void);
+void test_install_flowmods(void);
 
 
 #endif

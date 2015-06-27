@@ -473,13 +473,13 @@ static rofl_of1x_fm_result_t __of1x_insert_intermediate_leaf_trie(of1x_trie_t* t
 	}
 
 	//Now insert
-	if(intermediate->parent){
-		if(intermediate->prev)
+	if(intermediate->prev){
 			intermediate->prev->next = intermediate;
-		else
-			intermediate->parent->inner = intermediate;
 	}else{
-		trie->root = intermediate;
+		if(intermediate->parent)
+			intermediate->parent->inner = intermediate;
+		else
+			trie->root = intermediate;
 	}
 	return ROFL_OF1X_FM_SUCCESS;
 }
