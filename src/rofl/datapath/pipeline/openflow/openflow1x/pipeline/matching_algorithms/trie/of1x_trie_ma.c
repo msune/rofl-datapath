@@ -787,7 +787,7 @@ rofl_result_t of1x_modify_flow_entry_trie(of1x_flow_table_t *const table,
 		it = NULL;
 
 	do{
-		//Get next exact
+		//Get next matching entry
 		if(!it)
 			it = of1x_find_reen_trie(&entry->matches, &prev,
 									&next,
@@ -833,7 +833,6 @@ MODIFY_NEXT:
 	}while(1);
 
 MODIFY_END:
-
 	platform_mutex_unlock(table->mutex);
 	platform_rwlock_wrunlock(table->rwlock);
 
@@ -863,7 +862,98 @@ rofl_result_t of1x_remove_flow_entry_trie(of1x_flow_table_t *const table,
 						of1x_flow_remove_reason_t reason,
 						of1x_mutex_acquisition_required_t mutex_acquired){
 
-	return ROFL_FAILURE;
+	struct of1x_trie_leaf *prev, *next;
+	of1x_flow_entry_t *it, *aux;
+	of1x_trie_t* trie = (of1x_trie_t*)table->matching_aux[0];
+	of_version_t ver = table->pipeline->sw->of_ver;
+
+	rofl_result_t res = ROFL_SUCCESS;
+
+	//Basic sanitychecks
+	if( (entry&&specific_entry) ||  (!entry && !specific_entry) )
+		return ROFL_FAILURE;
+
+	//Do not allow stats during insertion
+	platform_rwlock_wrlock(table->rwlock);
+
+	//Allow single add/remove operation over the table
+	platform_mutex_lock(table->mutex);
+
+	//Point to the root of the tree
+	prev = NULL;
+	next = trie->root;
+
+	//Set aux
+	aux = (entry)? entry : specific_entry;
+
+	//No match entries
+	if(!entry->matches.head)
+		it = trie->entry;
+	else
+		it = NULL;
+
+	do{
+		//Get next matching entry
+		if(!it)
+			it = of1x_find_reen_trie(&aux->matches, &prev,
+									&next,
+									true,
+									true);
+		//If no more entries are found, we are done
+		if(!it)
+			goto REMOVE_END;
+
+		//Fast skip
+		if(specific_entry && it != specific_entry)
+			goto REMOVE_NEXT;
+
+		//Check priority and cookie
+		if(__of1x_check_priority_cookie_trie(aux, it, true, true &&
+									(ver != OF_VERSION_10)) == false)
+			goto REMOVE_NEXT;
+
+		//If strict check matches to be strictly the same
+		if(strict == STRICT &&
+			__of1x_flow_entry_check_equal(it, entry, out_port,
+									out_group,
+									true &&
+									(ver != OF_VERSION_10)) == false){
+			goto REMOVE_NEXT;
+		}
+
+		/*
+		* If we reach this point we have to remove the current entry
+		*/
+		//Print a nice trace
+		__of1x_remove_flow_entry_table_trace(" [trie]", entry, it, reason);
+
+		//Call platform hook
+		platform_of1x_remove_entry_hook(it);
+
+		//Perform removal
+		__of1x_remove_ll_prio_trie(&prev->entry, it);
+
+		//Wait for all cores to be aware
+#ifdef ROFL_PIPELINE_LOCKLESS
+		tid_wait_all_not_present(&table->tid_presence_mask);
+#endif
+		res = __of1x_destroy_flow_entry_with_reason(it, reason);
+
+		if(res != ROFL_SUCCESS)
+			goto REMOVE_END;
+
+		table->num_of_entries--;
+REMOVE_NEXT:
+
+		it = it->next;
+	}while(1);
+
+
+REMOVE_END:
+	platform_mutex_unlock(table->mutex);
+	platform_rwlock_wrunlock(table->rwlock);
+
+	return res;
 }
 
 rofl_result_t of1x_get_flow_stats_trie(struct of1x_flow_table *const table,
