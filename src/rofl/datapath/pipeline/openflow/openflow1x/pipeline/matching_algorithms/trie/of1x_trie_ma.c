@@ -84,7 +84,8 @@ rofl_result_t of1x_destroy_trie(struct of1x_flow_table *const table){
 //
 //Linked-list
 //
-void __of1x_add_ll_prio_trie(of1x_flow_entry_t** head, of1x_flow_entry_t* entry){
+void __of1x_add_ll_prio_trie(of1x_flow_entry_t** head,
+					of1x_flow_entry_t* entry){
 
 	of1x_flow_entry_t *tmp;
 
@@ -129,7 +130,8 @@ void __of1x_add_ll_prio_trie(of1x_flow_entry_t** head, of1x_flow_entry_t* entry)
 	assert(0);
 }
 
-void __of1x_remove_ll_prio_trie(of1x_flow_entry_t** head, of1x_flow_entry_t* entry){
+void __of1x_remove_ll_prio_trie(of1x_flow_entry_t** head,
+						of1x_flow_entry_t* entry){
 
 	if(!head || *head == NULL){
 		assert(0);
@@ -619,6 +621,9 @@ rofl_of1x_fm_result_t of1x_add_flow_entry_trie(of1x_flow_table_t *const table,
 	struct of1x_trie_leaf *prev, *next;
 	of1x_flow_entry_t *curr_entry, *to_be_removed=NULL, **ll_head;
 
+	//Do not allow stats during insertion
+	platform_rwlock_wrlock(table->rwlock);
+
 	//Allow single add/remove operation over the table
 	platform_mutex_lock(table->mutex);
 
@@ -636,26 +641,25 @@ rofl_of1x_fm_result_t of1x_add_flow_entry_trie(of1x_flow_table_t *const table,
 
 		do{
 			//Get next overlapping
-			if(!curr_entry){
+			if(!curr_entry)
 				curr_entry = of1x_find_reen_trie(&entry->matches, &prev,
 										&next,
 										true,
 										false);
 
-				//If no more entries are found, we are done
-				if(!curr_entry)
-					break;
-			}
+			//If no more entries are found, we are done
+			if(!curr_entry)
+				break;
 
 			//Check cookie and priority
-			if(curr_entry && __of1x_check_priority_cookie_trie(entry,
-										curr_entry,
+			if(__of1x_check_priority_cookie_trie(entry, curr_entry,
 										true,
 										false)){
 				res = ROFL_OF1X_FM_OVERLAP;
 				ROFL_PIPELINE_ERR("[flowmod-add(%p)][trie] Overlaps with, at least, another entry (%p)\n", entry, curr_entry);
 				goto ADD_END;
 			}
+
 			curr_entry = curr_entry->next;
 		}while(1);
 	}
@@ -724,6 +728,9 @@ rofl_of1x_fm_result_t of1x_add_flow_entry_trie(of1x_flow_table_t *const table,
 				curr_entry->stats.s.__internal[0].byte_count += c.byte_count;
 			}
 
+			//Call the platform hook
+			platform_of1x_modify_entry_hook(curr_entry, entry, reset_counts);
+
 			goto ADD_END;
 		}
 		curr_entry = curr_entry->next;
@@ -731,17 +738,23 @@ rofl_of1x_fm_result_t of1x_add_flow_entry_trie(of1x_flow_table_t *const table,
 
 	//If we got in here, we have to add the entry (no existing entries)
 	res = __of1x_add_leafs_trie(trie, entry);
-	table->num_of_entries++;
+
+	if(res == ROFL_OF1X_FM_SUCCESS){
+		//Call the platform
+		plaftorm_of1x_add_entry_hook(entry);
+		table->num_of_entries++;
+	}
 
 ADD_END:
+	platform_mutex_unlock(table->mutex);
+	platform_rwlock_wrunlock(table->rwlock);
+
 	if(to_be_removed){
 #ifdef ROFL_PIPELINE_LOCKLESS
 		tid_wait_all_not_present(&table->tid_presence_mask);
 #endif
 		of1x_destroy_flow_entry(to_be_removed);
 	}
-
-	platform_mutex_unlock(table->mutex);
 
 	return res;
 }
@@ -750,7 +763,95 @@ rofl_result_t of1x_modify_flow_entry_trie(of1x_flow_table_t *const table,
 						of1x_flow_entry_t *const entry,
 						const enum of1x_flow_removal_strictness strict,
 						bool reset_counts){
-	return ROFL_FAILURE;
+
+	struct of1x_trie_leaf *prev, *next;
+	of1x_flow_entry_t *it;
+	of1x_trie_t* trie = (of1x_trie_t*)table->matching_aux[0];
+	rofl_result_t res = ROFL_SUCCESS;
+	unsigned int moded=0;
+
+	//Do not allow stats during insertion
+	platform_rwlock_wrlock(table->rwlock);
+
+	//Allow single add/remove operation over the table
+	platform_mutex_lock(table->mutex);
+
+	//Point to the root of the tree
+	prev = NULL;
+	next = trie->root;
+
+	//No match entries
+	if(!entry->matches.head)
+		it = trie->entry;
+	else
+		it = NULL;
+
+	do{
+		//Get next exact
+		if(!it)
+			it = of1x_find_reen_trie(&entry->matches, &prev,
+									&next,
+									true,
+									true);
+		//If no more entries are found, we are done
+		if(!it)
+			goto MODIFY_END;
+
+		//Check priority and cookie
+		if(__of1x_check_priority_cookie_trie(entry, it, true, true)){
+			goto MODIFY_NEXT;
+		}
+
+		//If strict check matches to be strictly the same
+		if(strict == STRICT &&
+			__of1x_flow_entry_check_equal(it, entry, OF1X_PORT_ANY,
+									OF1X_GROUP_ANY,
+									true) == false){
+			goto MODIFY_NEXT;
+		}
+
+		/*
+		* If we reach this point we have to modify the current entry
+		*/
+
+		//Call platform
+		platform_of1x_modify_entry_hook(it, entry, reset_counts);
+		ROFL_PIPELINE_DEBUG("[flowmod-modify(%p)] Existing entry (%p) will be updated with (%p)\n", entry, it, entry);
+		if(__of1x_update_flow_entry(it, entry, reset_counts) != ROFL_SUCCESS){
+			res = ROFL_FAILURE;
+			goto MODIFY_END;
+		}
+		moded++;
+
+		//If modification was strict; we are done
+		//(there cannot be 2 entries that are equal in the tree)
+		if(strict == STRICT)
+			goto MODIFY_END;
+MODIFY_NEXT:
+
+		it = it->next;
+	}while(1);
+
+MODIFY_END:
+
+	platform_mutex_unlock(table->mutex);
+	platform_rwlock_wrunlock(table->rwlock);
+
+#ifdef ROFL_PIPELINE_LOCKLESS
+	tid_wait_all_not_present(&table->tid_presence_mask);
+#endif
+
+	//Destroy original entry
+	of1x_destroy_flow_entry(entry);
+
+	//According to spec
+	if(moded == 0 && res == ROFL_SUCCESS){
+		rofl_of1x_fm_result_t r;
+		r = of1x_add_flow_entry_trie(table, entry, false, reset_counts);
+		return (r == ROFL_OF1X_FM_SUCCESS)? ROFL_SUCCESS : ROFL_FAILURE;
+	}
+
+	return res;
 }
 
 rofl_result_t of1x_remove_flow_entry_trie(of1x_flow_table_t *const table,
@@ -761,6 +862,7 @@ rofl_result_t of1x_remove_flow_entry_trie(of1x_flow_table_t *const table,
 						uint32_t out_group,
 						of1x_flow_remove_reason_t reason,
 						of1x_mutex_acquisition_required_t mutex_acquired){
+
 	return ROFL_FAILURE;
 }
 
@@ -787,10 +889,10 @@ rofl_result_t of1x_get_flow_aggregate_stats_trie(struct of1x_flow_table *const t
 }
 
 of1x_flow_entry_t* of1x_find_entry_using_group_trie(of1x_flow_table_t *const table,
-		const unsigned int group_id){
-
+							const unsigned int group_id){
 	return NULL;
 }
+
 
 #define INDENT "  "
 
