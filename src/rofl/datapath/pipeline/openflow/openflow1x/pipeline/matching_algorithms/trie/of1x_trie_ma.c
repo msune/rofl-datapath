@@ -980,7 +980,49 @@ rofl_result_t of1x_get_flow_aggregate_stats_trie(struct of1x_flow_table *const t
 
 of1x_flow_entry_t* of1x_find_entry_using_group_trie(of1x_flow_table_t *const table,
 							const unsigned int group_id){
-	return NULL;
+
+	struct of1x_trie_leaf *prev, *next;
+	of1x_trie_t* trie = (of1x_trie_t*)table->matching_aux[0];
+	of1x_flow_entry_t *it, *found = NULL;
+
+	//Empty matches group (all)
+	of1x_match_group_t matches;
+	__of1x_init_match_group(&matches);
+
+	//Prevent writers to change structure during matching
+	platform_rwlock_rdlock(table->rwlock);
+
+	//Point to the root of the tree
+	prev = NULL;
+	next = trie->root;
+
+	//No match entries
+	it = trie->entry;
+
+	do{
+		//Get next matching entry
+		if(!it)
+			it = of1x_find_reen_trie(&matches, &prev,
+									&next,
+									true,
+									true);
+		//If no more entries are found, we are done
+		if(!it)
+			goto FIND_GROUP_END;
+
+		//Check if the
+		if(__of1x_instructions_contain_group(it, group_id)){
+			found = it;
+			break;
+		}
+
+		it = it->next;
+	}while(1);
+
+FIND_GROUP_END:
+	platform_rwlock_rdunlock(table->rwlock);
+
+	return found;
 }
 
 
