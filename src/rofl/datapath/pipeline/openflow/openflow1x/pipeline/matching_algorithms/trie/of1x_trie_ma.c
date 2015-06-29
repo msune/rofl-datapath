@@ -609,6 +609,77 @@ ADD_LEAFS_END:
 	return res;
 }
 
+void __of1x_prune_leafs_trie(of1x_flow_table_t *const table, of1x_trie_t* trie,
+							of1x_trie_leaf_t *prev){
+
+	//Make code readable
+	of1x_trie_leaf_t *to_prune= NULL, *aux;
+	of1x_flow_entry_t *it;
+	int64_t max;
+
+	//no-match entry
+	if(!prev)
+		return;
+
+	//If we have more entries or we are an intermediate
+	//leaf, just continue
+	if(prev->entry || prev->inner)
+		return;
+
+	to_prune = prev;
+	while(1){
+		aux = prev->parent;
+		if(!aux)
+			break;
+
+		if(aux->entry || aux->inner != to_prune ||
+			aux->next)
+			break;
+		to_prune = aux;
+	}
+
+	//Take the dead branch out
+	if(to_prune->prev)
+		to_prune->prev->next = to_prune->next;
+	else
+		to_prune->parent->inner = to_prune->next;
+
+	if(to_prune->next)
+		to_prune->next->prev = to_prune->prev;
+
+	//Adjust max inner priority (downgrade, eventually)
+	aux = to_prune->parent;
+	while(aux){
+		//If we were not the highest priority
+		//stop
+		max = -1;
+		it = aux->entry;
+		while(it){
+			max = (it->priority > max) ? it->priority : max;
+			it = it->next;
+		}
+
+		if(aux->inner && aux->inner_max_priority > max)
+			max = aux->inner_max_priority;
+
+		if(aux->inner_max_priority == max)
+			break;
+
+		aux->inner_max_priority = max;
+		aux = aux->parent;
+	}
+
+	//Make sure we don't have any thread processing packets
+#ifdef ROFL_PIPELINE_LOCKLESS
+	tid_wait_all_not_present(&table->tid_presence_mask);
+#endif
+
+	//Destroy the entire branch
+	of1x_destroy_leaf(to_prune);
+}
+
+
+
 //
 // Main routines
 //
@@ -938,6 +1009,9 @@ rofl_result_t of1x_remove_flow_entry_trie(of1x_flow_table_t *const table,
 		tid_wait_all_not_present(&table->tid_presence_mask);
 #endif
 		res = __of1x_destroy_flow_entry_with_reason(it, reason);
+
+		//Prune (collapse) trie
+		__of1x_prune_leafs_trie(table, trie, prev);
 
 		if(res != ROFL_SUCCESS)
 			goto REMOVE_END;
