@@ -1038,7 +1038,70 @@ rofl_result_t of1x_get_flow_stats_trie(struct of1x_flow_table *const table,
 		of1x_match_group_t *const matches,
 		of1x_stats_flow_msg_t* msg){
 
-	return ROFL_FAILURE;
+	of1x_trie_t* trie = (of1x_trie_t*)table->matching_aux[0];
+	struct of1x_trie_leaf *prev, *next;
+	bool check_cookie;
+	of1x_flow_entry_t flow_stats_entry, *it;
+	of1x_stats_single_flow_msg_t* flow_stats;
+	rofl_result_t res = ROFL_SUCCESS;
+
+	if( unlikely(msg==NULL) || unlikely(table==NULL) )
+		return ROFL_FAILURE;
+
+	//Flow stats entry for easy comparison
+	platform_memset(&flow_stats_entry, 0, sizeof(of1x_flow_entry_t));
+	flow_stats_entry.matches = *matches;
+	flow_stats_entry.cookie = cookie;
+	flow_stats_entry.cookie_mask = cookie_mask;
+	check_cookie = ( table->pipeline->sw->of_ver != OF_VERSION_10 ); //Ignore cookie in OF1.0
+
+	//Mark table as being read
+	platform_rwlock_rdlock(table->rwlock);
+
+	//Point to the root of the tree
+	prev = NULL;
+	next = trie->root;
+
+	//No match entries
+	it = trie->entry;
+
+	do{
+		//Get next matching entry
+		if(!it)
+			it = of1x_find_reen_trie(&flow_stats_entry.matches, &prev, &next,
+										false,
+										false);
+		//If no more entries are found, we are done
+		if(!it)
+			break;
+
+		//Check priority and cookie
+		if(__of1x_check_priority_cookie_trie(&flow_stats_entry, it, false, check_cookie))
+			break;
+
+		// update statistics from platform
+		platform_of1x_update_stats_hook(it);
+
+		//Create a new single flow entry and filling
+		flow_stats = __of1x_init_stats_single_flow_msg(it);
+
+		if(!flow_stats){
+			res = ROFL_FAILURE;
+			goto FLOW_STATS_END;
+		}
+
+		//Push this stat to the msg
+		__of1x_push_single_flow_stats_to_msg(msg, flow_stats);
+
+		it = it->next;
+	}while(1);
+
+FLOW_STATS_END:
+
+	//Release the table
+	platform_rwlock_rdunlock(table->rwlock);
+
+	return res;
 }
 
 rofl_result_t of1x_get_flow_aggregate_stats_trie(struct of1x_flow_table *const table,
@@ -1049,7 +1112,64 @@ rofl_result_t of1x_get_flow_aggregate_stats_trie(struct of1x_flow_table *const t
 		of1x_match_group_t *const matches,
 		of1x_stats_flow_aggregate_msg_t* msg){
 
-	return ROFL_FAILURE;
+	of1x_trie_t* trie = (of1x_trie_t*)table->matching_aux[0];
+	struct of1x_trie_leaf *prev, *next;
+	bool check_cookie;
+	of1x_flow_entry_t flow_stats_entry, *it;
+
+	if( unlikely(msg==NULL) || unlikely(table==NULL) )
+		return ROFL_FAILURE;
+
+	//Flow stats entry for easy comparison
+	platform_memset(&flow_stats_entry, 0, sizeof(of1x_flow_entry_t));
+	flow_stats_entry.matches = *matches;
+	flow_stats_entry.cookie = cookie;
+	flow_stats_entry.cookie_mask = cookie_mask;
+	check_cookie = ( table->pipeline->sw->of_ver != OF_VERSION_10 ); //Ignore cookie in OF1.0
+
+	//Mark table as being read
+	platform_rwlock_rdlock(table->rwlock);
+
+	//Point to the root of the tree
+	prev = NULL;
+	next = trie->root;
+
+	//No match entries
+	it = trie->entry;
+
+	do{
+		__of1x_stats_flow_tid_t c;
+
+		//Get next matching entry
+		if(!it)
+			it = of1x_find_reen_trie(&flow_stats_entry.matches, &prev, &next,
+										false,
+										false);
+		//If no more entries are found, we are done
+		if(!it)
+			break;
+
+		//Check priority and cookie
+		if(__of1x_check_priority_cookie_trie(&flow_stats_entry, it, false, check_cookie))
+			break;
+
+		// update statistics from platform
+		platform_of1x_update_stats_hook(it);
+
+		//Consolidate stats
+		__of1x_stats_flow_consolidate(&it->stats, &c);
+
+		msg->packet_count += c.packet_count;
+		msg->byte_count += c.byte_count;
+		msg->flow_count++;
+
+		it = it->next;
+	}while(1);
+
+	//Release the table
+	platform_rwlock_rdunlock(table->rwlock);
+
+	return ROFL_SUCCESS;
 }
 
 of1x_flow_entry_t* of1x_find_entry_using_group_trie(of1x_flow_table_t *const table,
@@ -1078,13 +1198,13 @@ of1x_flow_entry_t* of1x_find_entry_using_group_trie(of1x_flow_table_t *const tab
 		if(!it)
 			it = of1x_find_reen_trie(&matches, &prev,
 									&next,
-									true,
-									true);
+									false,
+									false);
 		//If no more entries are found, we are done
 		if(!it)
 			goto FIND_GROUP_END;
 
-		//Check if the
+		//Check if it really contains group inst
 		if(__of1x_instructions_contain_group(it, group_id)){
 			found = it;
 			break;
