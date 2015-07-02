@@ -15,7 +15,7 @@ typedef struct of1x_trie_leaf{
 	of1x_flow_entry_t* entry;
 
 	//Inner max priority
-	uint32_t inner_max_priority;
+	uint32_t imp;
 
 	//Inner branch(es)
 	struct of1x_trie_leaf* inner;

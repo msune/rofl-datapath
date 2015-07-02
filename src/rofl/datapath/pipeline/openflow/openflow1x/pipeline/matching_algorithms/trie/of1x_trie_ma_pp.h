@@ -27,7 +27,7 @@ static inline void of1x_check_leaf_trie(datapacket_t *const pkt,
 		return;
 
 	//Check inner
-	if(((int64_t)leaf->inner_max_priority) > *match_priority){
+	if(((int64_t)leaf->imp) > *match_priority){
 		//Check match
 		if(__of1x_check_match(pkt, &leaf->match)){
 			if(leaf->entry)

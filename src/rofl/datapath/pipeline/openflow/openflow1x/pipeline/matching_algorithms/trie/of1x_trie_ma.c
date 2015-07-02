@@ -343,7 +343,7 @@ static of1x_trie_leaf_t*  __of1x_create_new_branch_trie(int m_it, of1x_flow_entr
 		if(last_leaf){
 			last_leaf->entry = NULL;
 			last_leaf->next = last_leaf->prev = NULL;
-			last_leaf->inner_max_priority = entry->priority;
+			last_leaf->imp = entry->priority;
 		}
 
 		//Set the linked list
@@ -358,6 +358,7 @@ static of1x_trie_leaf_t*  __of1x_create_new_branch_trie(int m_it, of1x_flow_entr
 	}
 
 	last_leaf->entry = entry;
+	last_leaf->imp = entry->priority;
 
 	return new_branch;
 }
@@ -385,17 +386,12 @@ static rofl_of1x_fm_result_t __of1x_insert_next_leaf_trie(struct of1x_trie_leaf*
 	* Adjust inner max priority
 	*/
 
-	//First adjust our own group head
-	if(l->parent && (l->parent->inner->inner_max_priority < entry->priority)){
-		l->parent->inner->inner_max_priority = entry->priority;
-	}
-
 	//Then go recursively down
 	l_poi = l;
 	l = l->parent;
 	while(l){
-		if(l->inner_max_priority < entry->priority)
-			l->inner_max_priority = entry->priority;
+		if(l->imp < entry->priority)
+			l->imp = entry->priority;
 		else
 			break;
 		l = l->parent;
@@ -474,23 +470,23 @@ static rofl_of1x_fm_result_t __of1x_insert_intermediate_leaf_trie(of1x_trie_t* t
 	entry->prev = entry->next = NULL;
 
 	/*
-	* Adjust inner_max_priority
+	* Adjust imp
 	*/
-	if(l->inner_max_priority < entry->priority){
+	if(l->imp < entry->priority){
 		//Adjust intermediate
-		intermediate->inner_max_priority = entry->priority;
+		intermediate->imp = entry->priority;
 
 		//Recursively adjust
 		l = intermediate->parent;
 		while(l){
-			if(l->inner_max_priority < entry->priority)
-				l->inner_max_priority = entry->priority;
+			if(l->imp < entry->priority)
+				l->imp = entry->priority;
 			else
 				break;
 			l = l->parent;
 		}
 	}else{
-		intermediate->inner_max_priority = l->inner_max_priority;
+		intermediate->imp = l->imp;
 	}
 
 	//Now insert
@@ -521,12 +517,12 @@ static rofl_of1x_fm_result_t __of1x_insert_terminal_leaf_trie(struct of1x_trie_l
 	entry->next = NULL;
 
 	/*
-	* Adjust inner_max_priority
+	* Adjust imp
 	*/
-	max_priority = (max_priority > l->inner_max_priority)? max_priority : l->inner_max_priority;
+	max_priority = (max_priority > l->imp)? max_priority : l->imp;
 	while(l){
-		if(l->inner_max_priority < max_priority)
-			l->inner_max_priority = max_priority;
+		if(l->imp < max_priority)
+			l->imp = max_priority;
 		else
 			break;
 		l = l->parent;
@@ -629,7 +625,7 @@ ADD_LEAFS_END:
 }
 
 void __of1x_prune_leafs_trie(of1x_flow_table_t *const table, of1x_trie_t* trie,
-							of1x_trie_leaf_t *prev){
+							of1x_trie_leaf_t* prev){
 
 	//Make code readable
 	of1x_trie_leaf_t *to_prune=NULL, *aux;
@@ -641,13 +637,13 @@ void __of1x_prune_leafs_trie(of1x_flow_table_t *const table, of1x_trie_t* trie,
 		return;
 
 	//If we have more entries or we are an intermediate
-	//leaf, just continue
+	//leaf, just return
 	if(prev->entry || prev->inner)
 		return;
 
 	to_prune = prev;
 	while(1){
-		aux = prev->parent;
+		aux = to_prune->parent;
 		if(!aux)
 			break;
 
@@ -678,13 +674,13 @@ void __of1x_prune_leafs_trie(of1x_flow_table_t *const table, of1x_trie_t* trie,
 			it = it->next;
 		}
 
-		if(aux->inner && aux->inner_max_priority > max)
-			max = aux->inner_max_priority;
+		if(aux->inner && aux->imp > max)
+			max = aux->imp;
 
-		if(aux->inner_max_priority == max)
+		if(aux->imp == max)
 			break;
 
-		aux->inner_max_priority = max;
+		aux->imp = max;
 		aux = aux->parent;
 	}
 
@@ -1278,7 +1274,7 @@ static void of1x_dump_leaf_trie(struct of1x_trie_leaf *l, int indent, bool raw_n
 
 	ROFL_PIPELINE_INFO_NO_PREFIX("l:");
 	__of1x_dump_matches(&l->match, raw_nbo);
-	ROFL_PIPELINE_INFO_NO_PREFIX(" imp: %u ",l->inner_max_priority);
+	ROFL_PIPELINE_INFO_NO_PREFIX(" imp: %u ",l->imp);
 
 	if(l->entry)
 		ROFL_PIPELINE_INFO_NO_PREFIX("* p: %u (%p)", l->entry->priority, l->entry);
