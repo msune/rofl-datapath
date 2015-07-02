@@ -730,8 +730,7 @@ void test_remove_flowmods(){
 	//clean the table
 	clean_all();
 
-	CU_ASSERT(trie->root->next != NULL);
-	CU_ASSERT(trie->root->inner != NULL);
+	CU_ASSERT(trie->root == NULL);
 	CU_ASSERT(table->num_of_entries == 0);
 
 	of1x_full_dump_switch(sw, false);

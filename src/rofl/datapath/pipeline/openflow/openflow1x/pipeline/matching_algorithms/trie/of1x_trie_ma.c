@@ -644,11 +644,17 @@ bool __of1x_prune_leafs_trie(of1x_flow_table_t *const table, of1x_trie_t* trie,
 
 	//Check how many leafs do not have children
 	//(poor them)
-	to_prune = prev;
+	aux = prev;
 	while(1){
-		if(to_prune->entry || to_prune->inner) break;
-		if(to_prune->parent) break;
-		to_prune = to_prune->prev;
+		if(aux->entry) break;
+		to_prune = aux;
+		if(!aux->parent || aux->prev || aux->next) break;
+		aux = aux->parent;
+	}
+
+	if(!to_prune){
+		assert(0);
+		return false;
 	}
 
 	//Remove from the linked list
