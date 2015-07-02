@@ -465,6 +465,7 @@ static rofl_of1x_fm_result_t __of1x_insert_intermediate_leaf_trie(of1x_trie_t* t
 	//Previous leaf now child
 	l->parent = intermediate;
 	l->next = new_branch;
+	l->prev = NULL;
 
 	//Entry linked list
 	entry->prev = entry->next = NULL;
@@ -624,7 +625,7 @@ ADD_LEAFS_END:
 	return res;
 }
 
-void __of1x_prune_leafs_trie(of1x_flow_table_t *const table, of1x_trie_t* trie,
+bool __of1x_prune_leafs_trie(of1x_flow_table_t *const table, of1x_trie_t* trie,
 							of1x_trie_leaf_t* prev){
 
 	//Make code readable
@@ -634,12 +635,12 @@ void __of1x_prune_leafs_trie(of1x_flow_table_t *const table, of1x_trie_t* trie,
 
 	//no-match entry
 	if(!prev)
-		return;
+		return false;
 
 	//If we have more entries or we are an intermediate
 	//leaf, just return
 	if(prev->entry || prev->inner)
-		return;
+		return false;
 
 	//Check how many leafs do not have children
 	//(poor them)
@@ -696,6 +697,8 @@ void __of1x_prune_leafs_trie(of1x_flow_table_t *const table, of1x_trie_t* trie,
 
 	//Destroy the entire branch
 	of1x_destroy_leaf(to_prune);
+
+	return true;
 }
 
 
@@ -1047,11 +1050,16 @@ rofl_result_t of1x_remove_flow_entry_trie(of1x_flow_table_t *const table,
 #endif
 		res = __of1x_destroy_flow_entry_with_reason(it, reason);
 
-		//Prune (collapse) trie
-		__of1x_prune_leafs_trie(table, trie, prev);
-
 		if(res != ROFL_SUCCESS)
 			goto REMOVE_END;
+
+		//Prune (collapse) trie
+		if(__of1x_prune_leafs_trie(table, trie, prev)){
+			//If leafs have been destroyed, we
+			//need to start from the very beginning
+			prev = NULL;
+			next = trie->root;
+		}
 
 		table->num_of_entries--;
 
@@ -1271,6 +1279,8 @@ static void of1x_dump_leaf_trie(struct of1x_trie_leaf *l, int indent, bool raw_n
 
 	if(!l)
 		return;
+
+	assert(!l->parent || l->parent->inner!=l || (l->prev == NULL ));
 
 	ROFL_PIPELINE_INFO("[trie]");
 
