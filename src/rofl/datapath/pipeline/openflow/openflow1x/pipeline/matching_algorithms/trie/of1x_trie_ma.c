@@ -641,33 +641,35 @@ void __of1x_prune_leafs_trie(of1x_flow_table_t *const table, of1x_trie_t* trie,
 	if(prev->entry || prev->inner)
 		return;
 
+	//Check how many leafs do not have children
+	//(poor them)
 	to_prune = prev;
 	while(1){
-		aux = to_prune->parent;
-		if(!aux)
-			break;
-
-		if(aux->entry || aux->inner != to_prune ||
-			aux->next)
-			break;
-		to_prune = aux;
+		if(to_prune->entry || to_prune->inner) break;
+		if(to_prune->parent) break;
+		to_prune = to_prune->prev;
 	}
 
-	//Take the dead branch out
-	if(to_prune->prev)
+	//Remove from the linked list
+	if(to_prune->prev){
 		to_prune->prev->next = to_prune->next;
-	else
-		to_prune->parent->inner = to_prune->next;
-
-	if(to_prune->next)
-		to_prune->next->prev = to_prune->prev;
+		if(to_prune->next)
+			to_prune->next->prev = to_prune->prev;
+	}else{
+		if(to_prune->parent)
+			to_prune->parent->inner = to_prune->next;
+		else
+			trie->root = to_prune->next;
+		if(to_prune->next)
+			to_prune->next->prev = NULL;
+	}
 
 	//Adjust max inner priority (downgrade, eventually)
 	aux = to_prune->parent;
 	while(aux){
 		//If we were not the highest priority
 		//stop
-		max = -1;
+		max = 0;
 		it = aux->entry;
 		while(it){
 			max = (it->priority > max) ? it->priority : max;
@@ -688,6 +690,9 @@ void __of1x_prune_leafs_trie(of1x_flow_table_t *const table, of1x_trie_t* trie,
 #ifdef ROFL_PIPELINE_LOCKLESS
 	tid_wait_all_not_present(&table->tid_presence_mask);
 #endif
+
+	//Isolate
+	to_prune->next = to_prune->prev = NULL;
 
 	//Destroy the entire branch
 	of1x_destroy_leaf(to_prune);

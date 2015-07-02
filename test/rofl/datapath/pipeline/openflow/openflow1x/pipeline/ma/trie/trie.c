@@ -698,9 +698,7 @@ static void clean_all(){
 	of1x_flow_entry_t *entry = of1x_init_flow_entry(false);
 	CU_ASSERT(entry != NULL);
 
-	//CU_ASSERT(of1x_remove_flow_entry_table(&sw->pipeline, 0, entry, false, OF1X_PORT_ANY, OF1X_GROUP_ANY) == ROFL_SUCCESS);
-
-
+	CU_ASSERT(of1x_remove_flow_entry_table(&sw->pipeline, 0, entry, false, OF1X_PORT_ANY, OF1X_GROUP_ANY) == ROFL_SUCCESS);
 }
 
 void test_remove_flowmods(){
@@ -734,7 +732,7 @@ void test_remove_flowmods(){
 
 	CU_ASSERT(trie->root->next != NULL);
 	CU_ASSERT(trie->root->inner != NULL);
-	//CU_ASSERT(table->num_of_entries == 0);
+	CU_ASSERT(table->num_of_entries == 0);
 
 	of1x_full_dump_switch(sw, false);
 
