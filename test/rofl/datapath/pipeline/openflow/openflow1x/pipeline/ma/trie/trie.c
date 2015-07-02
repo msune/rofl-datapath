@@ -673,3 +673,51 @@ void test_install_flowmods(){
 	CU_ASSERT(trie->root->next->inner->next->entry->priority == 6999);
 
 }
+
+
+static void clean_all(){
+	of1x_flow_entry_t *entry = of1x_init_flow_entry(false);
+	CU_ASSERT(entry != NULL);
+
+	CU_ASSERT(of1x_remove_flow_entry_table(&sw->pipeline, 0, entry, false, OF1X_PORT_ANY, OF1X_GROUP_ANY) == ROFL_SUCCESS);
+
+
+}
+
+void test_remove_flowmods(){
+
+	//
+	// Expected tree structure:
+	//
+	/*
+	Empty match entries:
+	  * p: 110 (0x667b70)
+	  * p: 107 (0x668150)
+	  * p: 100 (0x666fb0)
+	  * p: 99 (0x668730)
+
+	Match entries:
+	 l:[IP4_SRC:0xc0a80000|0xffffff00],  imp: 3999 * p: 99 (0x669560)
+	   l:[IP4_SRC:0xc0a80000|0xfffffffc],  imp: 3999 
+	     l:[IP4_SRC:0xc0a80001|0xffffffff],  imp: 1999 * p: 999 (0x667590)
+	     l:[IP4_SRC:0xc0a80002|0xfffffffe],  imp: 3999 
+	       l:[IP4_SRC:0xc0a80002|0xffffffff],  imp: 4999 * p: 1999 (0x668e00)
+	       l:[IP4_SRC:0xc0a80003|0xffffffff],  imp: 3999 
+		 l:[IP4_DST:0xc0a80001|0xffffffff],  imp: 0 * p: 3999 (0x669c30)
+	       l:[IP4_DST:0xc0a8000a|0xffffffff],  imp: 0 * p: 4999 (0x66a480)
+	 l:[ETH_SRC:0xaab000000000|0xfff000000000],  imp: 6999 
+	   l:[ETH_SRC:0xaabbccddeeff|0xffffffffffff],  imp: 5999 
+	     l:[IP4_SRC:0xc0a80002|0xffffffff],  imp: 0 * p: 5999 (0x66abb0)
+	   l:[ETH_SRC:0xaab0ccddeeff|0xfff0ffffffff],  imp: 0 * p: 6999 (0x66b370)
+ 	*/
+	//clean the table
+	clean_all();
+
+	CU_ASSERT(trie->root->next != NULL);
+	CU_ASSERT(trie->root->inner != NULL);
+	CU_ASSERT(table->num_of_entries == 0);
+
+	of1x_full_dump_switch(sw, false);
+
+	//Regenerate
+}

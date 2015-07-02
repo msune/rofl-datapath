@@ -21,6 +21,7 @@ int tear_down(void);
 /* Test cases */
 void test_install_empty_flowmods(void);
 void test_install_flowmods(void);
+void test_remove_flowmods(void);
 
 
 #endif

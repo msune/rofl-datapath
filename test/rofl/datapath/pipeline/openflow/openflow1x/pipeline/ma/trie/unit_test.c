@@ -24,9 +24,9 @@ int main(int args, char** argv){
 	}
 
 	/* add the tests to the suite */
-	/* NOTE - ORDER IS IMPORTANT - MUST TEST fread() AFTER fprintf() */
 	if ((NULL == CU_add_test(pSuite, "test install empty flowmods", test_install_empty_flowmods)) ||
-	(NULL == CU_add_test(pSuite, "test install regular flowmods without and without masks", test_install_flowmods)) //||
+	(NULL == CU_add_test(pSuite, "test install regular flowmods without and without masks", test_install_flowmods)) ||
+	(NULL == CU_add_test(pSuite, "test removal regular flowmods without and without masks", test_remove_flowmods)) //||
 		)
 	{
 		fprintf(stderr,"ERROR WHILE ADDING TEST\n");

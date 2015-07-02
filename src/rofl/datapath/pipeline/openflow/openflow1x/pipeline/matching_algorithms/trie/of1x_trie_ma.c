@@ -156,29 +156,59 @@ void __of1x_remove_ll_prio_trie(of1x_flow_entry_t** head,
 //Helper functions
 //
 static bool __of1x_is_tern_submatch_trie(of1x_match_t* match,
-							of1x_match_group_t *const matches){
-	of1x_match_t* sub_match = matches->m_array[match->type];
+							of1x_match_group_t *const matches,
+							bool wildcard_matches){
+	of1x_match_t* sub_match;
+
+	if(!match)
+		return wildcard_matches;
+
+ 	sub_match = matches->m_array[match->type];
+
 	if(!sub_match)
-		return false;
+		return wildcard_matches;
+
 	return __of1x_is_submatch(sub_match, match);
 }
 
 static bool __of1x_is_tern_complete_match_trie(of1x_match_t* match,
-							of1x_match_group_t *const matches){
-	of1x_match_t* mg = matches->m_array[match->type];
+							of1x_match_group_t *const matches,
+							bool wildcard_matches){
+	of1x_match_t* m = matches->m_array[match->type];
 	of1x_match_t alike_match;
 
-	if(__of1x_get_alike_match(match, mg, &alike_match))
+	if(!m || !match)
+		return wildcard_matches;
+
+	if(__of1x_get_alike_match(match, m, &alike_match))
 		return false;
 	return __of1x_equal_matches(match, &alike_match);
 }
 
-//Find overlapping entries
+//
+// Utils
+//
+
+//
+// Find matching leaf branches/entries.
+//
+// This is a swiss-knife function
+// that can match or perform lookups, depending on the flags
+//
+//
+// @param matches Match agains this
+// @param prev Last leaf matched
+// @param next Next leaf to continue the search
+// @param all Check all entries (follow all paths)
+// @param lookup Perform find using lookup criteria; full wildcard
+// (no match) is a positive match.
+//
 static of1x_flow_entry_t* of1x_find_reen_trie( of1x_match_group_t *const matches,
 								struct of1x_trie_leaf** prev,
 								struct of1x_trie_leaf** next,
-								bool check_overlap,
-								bool check_complete){
+								bool all,
+								bool check_complete,
+								bool lookup){
 	of1x_flow_entry_t* res = NULL;
 	of1x_match_t* leaf_match;
 	of1x_trie_leaf_t* curr;
@@ -203,23 +233,15 @@ FIND_START:
 
 	//Check itself
 	leaf_match = &curr->match;
-	if(check_overlap){
-		//Overlap
-		if( !__of1x_is_tern_submatch_trie(leaf_match, matches) &&
-			 !__of1x_is_tern_submatch_trie(leaf_match, matches) )
-			goto FIND_NEXT;
-	}else{
-		//Contained
-		if( !__of1x_is_tern_submatch_trie(leaf_match, matches))
-			goto FIND_NEXT;
-	}
+	if(!all && !__of1x_is_tern_submatch_trie(leaf_match, matches, lookup))
+		goto FIND_NEXT;
 
 	//Matches, check if there is an entry
 	if(curr->entry){
 		if(check_complete){
 			//If check_complete is 1, we have to make sure
 			//we match completely and not partially the match
-			if(!__of1x_is_tern_complete_match_trie(leaf_match, matches))
+			if(!__of1x_is_tern_complete_match_trie(leaf_match, matches, lookup))
 				goto FIND_NEXT;
 		}
 
@@ -241,7 +263,7 @@ FIND_START:
 			//If check_complete is 1, we have to make sure
 			//we match completely and not partially the match
 			if(leaf_match->type != curr->inner->match.type &&
-				! __of1x_is_tern_complete_match_trie(leaf_match, matches))
+				! __of1x_is_tern_complete_match_trie(leaf_match, matches, lookup))
 				goto FIND_NEXT;
 		}
 		//Check inner
@@ -260,9 +282,6 @@ FIND_END:
 	return res;
 }
 
-//
-// Utils
-//
 
 static bool __of1x_check_priority_cookie_trie(of1x_flow_entry_t *const entry,
 						of1x_flow_entry_t *const trie_entry,
@@ -613,7 +632,7 @@ void __of1x_prune_leafs_trie(of1x_flow_table_t *const table, of1x_trie_t* trie,
 							of1x_trie_leaf_t *prev){
 
 	//Make code readable
-	of1x_trie_leaf_t *to_prune= NULL, *aux;
+	of1x_trie_leaf_t *to_prune=NULL, *aux;
 	of1x_flow_entry_t *it;
 	int64_t max;
 
@@ -703,6 +722,11 @@ rofl_of1x_fm_result_t of1x_add_flow_entry_trie(of1x_flow_table_t *const table,
 	*/
 
 	if(check_overlap){
+
+		//Empty matches group (all)
+		of1x_match_group_t matches;
+		__of1x_init_match_group(&matches);
+
 		//Point to the root of the tree
 		prev = NULL;
 		next = trie->root;
@@ -711,21 +735,22 @@ rofl_of1x_fm_result_t of1x_add_flow_entry_trie(of1x_flow_table_t *const table,
 		curr_entry = trie->entry;
 
 		do{
-			//Get next overlapping
+			//Get next entry (all)
 			if(!curr_entry)
-				curr_entry = of1x_find_reen_trie(&entry->matches, &prev,
+				curr_entry = of1x_find_reen_trie(&matches, &prev,
 										&next,
 										true,
-										false);
+										false,
+										true);
 
 			//If no more entries are found, we are done
 			if(!curr_entry)
 				break;
 
-			//Check cookie and priority
-			if(__of1x_check_priority_cookie_trie(entry, curr_entry,
-										true,
-										false)){
+			//Really check overlap
+			if(__of1x_flow_entry_check_overlap(curr_entry, entry, true, false,
+										OF1X_PORT_ANY,
+										OF1X_GROUP_ANY)){
 				res = ROFL_OF1X_FM_OVERLAP;
 				ROFL_PIPELINE_ERR("[flowmod-add(%p)][trie] Overlaps with, at least, another entry (%p)\n", entry, curr_entry);
 				goto ADD_END;
@@ -757,7 +782,8 @@ rofl_of1x_fm_result_t of1x_add_flow_entry_trie(of1x_flow_table_t *const table,
 			curr_entry = of1x_find_reen_trie(&entry->matches, &prev,
 									&next,
 									true,
-									true);
+									true,
+									false);
 			//If no more entries are found, we are done
 			if(!curr_entry)
 				break;
@@ -839,6 +865,7 @@ rofl_result_t of1x_modify_flow_entry_trie(of1x_flow_table_t *const table,
 	of1x_flow_entry_t *it;
 	of1x_trie_t* trie = (of1x_trie_t*)table->matching_aux[0];
 	rofl_result_t res = ROFL_SUCCESS;
+	bool check_cookie = ( table->pipeline->sw->of_ver != OF_VERSION_10 ); //Ignore cookie in OF1.0
 	unsigned int moded=0;
 
 	//Do not allow stats during insertion
@@ -863,21 +890,20 @@ rofl_result_t of1x_modify_flow_entry_trie(of1x_flow_table_t *const table,
 			it = of1x_find_reen_trie(&entry->matches, &prev,
 									&next,
 									true,
+									true,
 									true);
 		//If no more entries are found, we are done
 		if(!it)
 			goto MODIFY_END;
 
-		//Check priority and cookie
-		if(__of1x_check_priority_cookie_trie(entry, it, true, true)){
-			goto MODIFY_NEXT;
-		}
-
 		//If strict check matches to be strictly the same
-		if(strict == STRICT &&
-			__of1x_flow_entry_check_equal(it, entry, OF1X_PORT_ANY,
+		if(strict == STRICT){
+			if(__of1x_check_priority_cookie_trie(entry, it, true, check_cookie) == false)
+				goto MODIFY_NEXT;
+
+			if(__of1x_flow_entry_check_equal(it, entry, OF1X_PORT_ANY,
 									OF1X_GROUP_ANY,
-									true) == false){
+									true) == false)
 			goto MODIFY_NEXT;
 		}
 
@@ -924,6 +950,9 @@ MODIFY_END:
 	return res;
 }
 
+//TODO: remove
+void of1x_dump_trie(struct of1x_flow_table *const table, bool raw_nbo);
+
 rofl_result_t of1x_remove_flow_entry_trie(of1x_flow_table_t *const table,
 						of1x_flow_entry_t *const entry,
 						of1x_flow_entry_t *const specific_entry,
@@ -934,11 +963,11 @@ rofl_result_t of1x_remove_flow_entry_trie(of1x_flow_table_t *const table,
 						of1x_mutex_acquisition_required_t mutex_acquired){
 
 	struct of1x_trie_leaf *prev, *next;
-	of1x_flow_entry_t *it, *aux;
+	of1x_flow_entry_t *it, *aux, *tmp_next;
 	of1x_trie_t* trie = (of1x_trie_t*)table->matching_aux[0];
-	of_version_t ver = table->pipeline->sw->of_ver;
 
 	rofl_result_t res = ROFL_SUCCESS;
+	bool check_cookie = ( table->pipeline->sw->of_ver != OF_VERSION_10 ); //Ignore cookie in OF1.0
 
 	//Basic sanitychecks
 	if( (entry&&specific_entry) ||  (!entry && !specific_entry) )
@@ -965,11 +994,14 @@ rofl_result_t of1x_remove_flow_entry_trie(of1x_flow_table_t *const table,
 
 	do{
 		//Get next matching entry
-		if(!it)
+		if(!it){
+			of1x_dump_trie(table, false);
 			it = of1x_find_reen_trie(&aux->matches, &prev,
 									&next,
-									true,
+									false,
+									false,
 									true);
+		}
 		//If no more entries are found, we are done
 		if(!it)
 			goto REMOVE_END;
@@ -979,16 +1011,14 @@ rofl_result_t of1x_remove_flow_entry_trie(of1x_flow_table_t *const table,
 			goto REMOVE_NEXT;
 
 		//Check priority and cookie
-		if(__of1x_check_priority_cookie_trie(aux, it, true, true &&
-									(ver != OF_VERSION_10)) == false)
+		if(strict == STRICT){
+			if(__of1x_check_priority_cookie_trie(aux, it, true,
+									check_cookie) == false)
 			goto REMOVE_NEXT;
 
-		//If strict check matches to be strictly the same
-		if(strict == STRICT &&
-			__of1x_flow_entry_check_equal(it, entry, out_port,
+			if(__of1x_flow_entry_check_equal(it, entry, out_port,
 									out_group,
-									true &&
-									(ver != OF_VERSION_10)) == false){
+									check_cookie) == false)
 			goto REMOVE_NEXT;
 		}
 
@@ -1001,8 +1031,14 @@ rofl_result_t of1x_remove_flow_entry_trie(of1x_flow_table_t *const table,
 		//Call platform hook
 		platform_of1x_remove_entry_hook(it);
 
+		//Save before removal
+		tmp_next = it->next;
+
 		//Perform removal
-		__of1x_remove_ll_prio_trie(&prev->entry, it);
+		if(prev)
+			__of1x_remove_ll_prio_trie(&prev->entry, it);
+		else
+			__of1x_remove_ll_prio_trie(&trie->entry, it);
 
 		//Wait for all cores to be aware
 #ifdef ROFL_PIPELINE_LOCKLESS
@@ -1017,6 +1053,9 @@ rofl_result_t of1x_remove_flow_entry_trie(of1x_flow_table_t *const table,
 			goto REMOVE_END;
 
 		table->num_of_entries--;
+
+		it = tmp_next;
+		continue;
 REMOVE_NEXT:
 
 		it = it->next;
@@ -1070,7 +1109,8 @@ rofl_result_t of1x_get_flow_stats_trie(struct of1x_flow_table *const table,
 		if(!it)
 			it = of1x_find_reen_trie(&flow_stats_entry.matches, &prev, &next,
 										false,
-										false);
+										false,
+										true);
 		//If no more entries are found, we are done
 		if(!it)
 			break;
@@ -1143,8 +1183,9 @@ rofl_result_t of1x_get_flow_aggregate_stats_trie(struct of1x_flow_table *const t
 		//Get next matching entry
 		if(!it)
 			it = of1x_find_reen_trie(&flow_stats_entry.matches, &prev, &next,
+										true,
 										false,
-										false);
+										true);
 		//If no more entries are found, we are done
 		if(!it)
 			break;
@@ -1198,8 +1239,9 @@ of1x_flow_entry_t* of1x_find_entry_using_group_trie(of1x_flow_table_t *const tab
 		if(!it)
 			it = of1x_find_reen_trie(&matches, &prev,
 									&next,
+									true,
 									false,
-									false);
+									true);
 		//If no more entries are found, we are done
 		if(!it)
 			goto FIND_GROUP_END;
