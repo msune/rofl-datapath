@@ -703,6 +703,8 @@ static void clean_all(){
 
 void test_remove_flowmods(){
 
+	of1x_flow_entry_t *entry;
+
 	//
 	// Expected tree structure:
 	//
@@ -736,4 +738,58 @@ void test_remove_flowmods(){
 	of1x_full_dump_switch(sw, false);
 
 	//Regenerate
+	test_install_empty_flowmods();
+	test_install_flowmods();
+
+	of1x_full_dump_switch(sw, false);
+
+	///
+	/// remove only one of the flowmods without matches
+	//
+	entry = of1x_init_flow_entry(false);
+	CU_ASSERT(entry != NULL);
+
+	//First try with an invalid priority
+	entry->priority = 1;
+	CU_ASSERT(of1x_remove_flow_entry_table(&sw->pipeline, 0, entry, true, OF1X_PORT_ANY, OF1X_GROUP_ANY) == ROFL_SUCCESS);
+	CU_ASSERT(table->num_of_entries == 11);
+
+	of1x_full_dump_switch(sw, false);
+	entry->priority = 107;
+	CU_ASSERT(of1x_remove_flow_entry_table(&sw->pipeline, 0, entry, true, OF1X_PORT_ANY, OF1X_GROUP_ANY) == ROFL_SUCCESS);
+	CU_ASSERT(table->num_of_entries == 10);
+
+	of1x_full_dump_switch(sw, false);
+
+	entry->priority = 99;
+	CU_ASSERT(of1x_remove_flow_entry_table(&sw->pipeline, 0, entry, true, OF1X_PORT_ANY, OF1X_GROUP_ANY) == ROFL_SUCCESS);
+	CU_ASSERT(table->num_of_entries == 9);
+
+	of1x_full_dump_switch(sw, false);
+	entry->priority = 110;
+	CU_ASSERT(of1x_remove_flow_entry_table(&sw->pipeline, 0, entry, true, OF1X_PORT_ANY, OF1X_GROUP_ANY) == ROFL_SUCCESS);
+	CU_ASSERT(table->num_of_entries == 8);
+
+	of1x_full_dump_switch(sw, false);
+	entry->priority = 100;
+	CU_ASSERT(of1x_remove_flow_entry_table(&sw->pipeline, 0, entry, true, OF1X_PORT_ANY, OF1X_GROUP_ANY) == ROFL_SUCCESS);
+	CU_ASSERT(table->num_of_entries == 7);
+
+
+	of1x_full_dump_switch(sw, false);
+	///
+	/// Remove now non specific, but with limited matches
+	///
+	entry->priority = 6789; //whatever
+	CU_ASSERT(of1x_add_match_to_entry(entry,of1x_init_ip4_src_match(0xC0A80003, 0xFFFFFFFF)) == ROFL_SUCCESS);
+	CU_ASSERT(of1x_remove_flow_entry_table(&sw->pipeline, 0, entry, true, OF1X_PORT_ANY, OF1X_GROUP_ANY) == ROFL_SUCCESS);
+	CU_ASSERT(table->num_of_entries == 7);
+	CU_ASSERT(of1x_remove_flow_entry_table(&sw->pipeline, 0, entry, false, OF1X_PORT_ANY, OF1X_GROUP_ANY) == ROFL_SUCCESS);
+	CU_ASSERT(table->num_of_entries == 6);
+	CU_ASSERT(trie->root->inner->inner->next->inner->next->next == NULL);
+	CU_ASSERT(trie->root->inner->inner->next->inner->next->match.__tern.value.u32 == HTONB32(0xC0A8000A));
+	CU_ASSERT(trie->root->inner->inner->next->inner->next->match.__tern.mask.u32 == HTONB32(0xFFFFFFFF));
+
+	of1x_full_dump_switch(sw, false);
+
 }

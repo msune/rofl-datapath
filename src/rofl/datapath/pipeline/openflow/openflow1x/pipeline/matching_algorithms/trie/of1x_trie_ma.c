@@ -148,7 +148,8 @@ void __of1x_remove_ll_prio_trie(of1x_flow_entry_t** head,
 		entry->prev->next = entry->next;
 
 		//This is not
-		entry->next->prev = entry->prev;
+		if(entry->next)
+			entry->next->prev = entry->prev;
 	}
 }
 
@@ -212,6 +213,8 @@ static of1x_flow_entry_t* of1x_find_reen_trie( of1x_match_group_t *const matches
 	of1x_flow_entry_t* res = NULL;
 	of1x_match_t* leaf_match;
 	of1x_trie_leaf_t* curr;
+
+	assert((all&lookup) == false);
 
 FIND_START:
 	//Set next
@@ -751,7 +754,7 @@ rofl_of1x_fm_result_t of1x_add_flow_entry_trie(of1x_flow_table_t *const table,
 										&next,
 										true,
 										false,
-										true);
+										false);
 
 			//If no more entries are found, we are done
 			if(!curr_entry)
@@ -899,8 +902,8 @@ rofl_result_t of1x_modify_flow_entry_trie(of1x_flow_table_t *const table,
 		if(!it)
 			it = of1x_find_reen_trie(&entry->matches, &prev,
 									&next,
-									true,
-									true,
+									false,
+									strict == STRICT,
 									true);
 		//If no more entries are found, we are done
 		if(!it)
@@ -960,9 +963,6 @@ MODIFY_END:
 	return res;
 }
 
-//TODO: remove
-void of1x_dump_trie(struct of1x_flow_table *const table, bool raw_nbo);
-
 rofl_result_t of1x_remove_flow_entry_trie(of1x_flow_table_t *const table,
 						of1x_flow_entry_t *const entry,
 						of1x_flow_entry_t *const specific_entry,
@@ -1005,11 +1005,10 @@ rofl_result_t of1x_remove_flow_entry_trie(of1x_flow_table_t *const table,
 	do{
 		//Get next matching entry
 		if(!it){
-			of1x_dump_trie(table, false);
 			it = of1x_find_reen_trie(&aux->matches, &prev,
 									&next,
 									false,
-									false,
+									strict == STRICT,
 									true);
 		}
 		//If no more entries are found, we are done
@@ -1198,7 +1197,7 @@ rofl_result_t of1x_get_flow_aggregate_stats_trie(struct of1x_flow_table *const t
 		//Get next matching entry
 		if(!it)
 			it = of1x_find_reen_trie(&flow_stats_entry.matches, &prev, &next,
-										true,
+										false,
 										false,
 										true);
 		//If no more entries are found, we are done
