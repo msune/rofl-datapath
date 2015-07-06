@@ -1271,7 +1271,7 @@ of1x_flow_entry_t* of1x_find_entry_using_group_trie(of1x_flow_table_t *const tab
 									&next,
 									true,
 									false,
-									true);
+									false);
 		//If no more entries are found, we are done
 		if(!it)
 			goto FIND_GROUP_END;
