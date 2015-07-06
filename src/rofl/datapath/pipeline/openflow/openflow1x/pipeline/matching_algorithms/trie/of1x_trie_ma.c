@@ -1141,7 +1141,7 @@ rofl_result_t of1x_get_flow_stats_trie(struct of1x_flow_table *const table,
 									out_port,
 									out_group,
 									true))
-			continue;
+			goto STATS_NEXT;
 
 		//Update statistics from platform
 		platform_of1x_update_stats_hook(it);
@@ -1157,6 +1157,7 @@ rofl_result_t of1x_get_flow_stats_trie(struct of1x_flow_table *const table,
 		//Push this stat to the msg
 		__of1x_push_single_flow_stats_to_msg(msg, flow_stats);
 
+STATS_NEXT:
 		it = it->next;
 	}while(1);
 
@@ -1220,7 +1221,7 @@ rofl_result_t of1x_get_flow_aggregate_stats_trie(struct of1x_flow_table *const t
 									out_port,
 									out_group,
 									true))
-			continue;
+			goto AGGREGATE_STATS_NEXT;
 
 		// update statistics from platform
 		platform_of1x_update_stats_hook(it);
@@ -1232,6 +1233,7 @@ rofl_result_t of1x_get_flow_aggregate_stats_trie(struct of1x_flow_table *const t
 		msg->byte_count += c.byte_count;
 		msg->flow_count++;
 
+AGGREGATE_STATS_NEXT:
 		it = it->next;
 	}while(1);
 
