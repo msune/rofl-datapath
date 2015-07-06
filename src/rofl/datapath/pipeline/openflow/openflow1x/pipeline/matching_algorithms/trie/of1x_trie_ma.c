@@ -856,6 +856,9 @@ rofl_of1x_fm_result_t of1x_add_flow_entry_trie(of1x_flow_table_t *const table,
 		table->num_of_entries++;
 	}
 
+	//Set table pointer
+	entry->table = table;
+
 ADD_END:
 	platform_mutex_unlock(table->mutex);
 	platform_rwlock_wrunlock(table->rwlock);
