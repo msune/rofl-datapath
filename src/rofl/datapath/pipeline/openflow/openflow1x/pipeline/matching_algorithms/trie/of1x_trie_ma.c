@@ -1140,7 +1140,7 @@ rofl_result_t of1x_get_flow_stats_trie(struct of1x_flow_table *const table,
 									check_cookie,
 									out_port,
 									out_group,
-									true))
+									true) == false)
 			goto STATS_NEXT;
 
 		//Update statistics from platform
@@ -1220,7 +1220,7 @@ rofl_result_t of1x_get_flow_aggregate_stats_trie(struct of1x_flow_table *const t
 									check_cookie,
 									out_port,
 									out_group,
-									true))
+									true) == false)
 			goto AGGREGATE_STATS_NEXT;
 
 		// update statistics from platform
