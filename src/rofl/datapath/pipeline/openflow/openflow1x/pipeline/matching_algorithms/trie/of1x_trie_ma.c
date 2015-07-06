@@ -1329,17 +1329,18 @@ void of1x_dump_trie(struct of1x_flow_table *const table, bool raw_nbo){
 
 	of1x_trie_t* trie = (of1x_trie_t*)table->matching_aux[0];
 	of1x_flow_entry_t* it;
-
+	struct of1x_trie_leaf *prev, *next;
 	__of1x_stats_table_tid_t c;
+	of1x_match_group_t matches;
 
-	//Consolidate stats
+	__of1x_init_match_group(&matches);
 	__of1x_stats_table_consolidate(&table->stats, &c);
 
 	ROFL_PIPELINE_INFO("[trie]\n");
 	ROFL_PIPELINE_INFO("[trie] Dumping table # %u (%p). Default action: %s, num. of entries: %d, ma: %u statistics {looked up: %u, matched: %u}\n", table->number, table, __of1x_flow_table_miss_config_str[table->default_action],table->num_of_entries, table->matching_algorithm,  c.lookup_count, c.matched_count);
 
 	ROFL_PIPELINE_INFO("[trie]\n");
-	ROFL_PIPELINE_INFO("[trie] Empty match entries:\n");
+	ROFL_PIPELINE_INFO("[trie] No matches:\n");
 
 	//Empty entry
 	it = trie->entry;
@@ -1349,10 +1350,33 @@ void of1x_dump_trie(struct of1x_flow_table *const table, bool raw_nbo){
 	}
 	if(trie->entry)
 		ROFL_PIPELINE_INFO("[trie]\n");
-	ROFL_PIPELINE_INFO("[trie] Match entries:\n");
+	ROFL_PIPELINE_INFO("[trie] Trie structure:\n");
 
 	//Start the recursion
 	of1x_dump_leaf_trie(trie->root, 0, raw_nbo);
+
+	//Now print the complete
+	ROFL_PIPELINE_INFO("[trie] \n");
+	ROFL_PIPELINE_INFO("[trie] Entries:\n");
+	it = trie->entry;
+	prev = NULL;
+	next = trie->root;
+
+	while(1){
+		if(!it)
+			it = of1x_find_reen_trie(&matches, &prev, &next,
+								true,
+								false,
+								false);
+		if(!it)
+			break;
+
+		//Dump
+		ROFL_PIPELINE_INFO("[trie] ");
+		of1x_dump_flow_entry(it, raw_nbo);
+
+		it = it->next;
+	}
 
 }
 
