@@ -1135,11 +1135,15 @@ rofl_result_t of1x_get_flow_stats_trie(struct of1x_flow_table *const table,
 		if(!it)
 			break;
 
-		//Check priority and cookie
-		if(__of1x_check_priority_cookie_trie(&flow_stats_entry, it, false, check_cookie))
-			break;
+		//Check if it is really contained and out port/group
+		if(__of1x_flow_entry_check_contained(&flow_stats_entry, it, false,
+									check_cookie,
+									out_port,
+									out_group,
+									true))
+			continue;
 
-		// update statistics from platform
+		//Update statistics from platform
 		platform_of1x_update_stats_hook(it);
 
 		//Create a new single flow entry and filling
@@ -1210,9 +1214,13 @@ rofl_result_t of1x_get_flow_aggregate_stats_trie(struct of1x_flow_table *const t
 		if(!it)
 			break;
 
-		//Check priority and cookie
-		if(__of1x_check_priority_cookie_trie(&flow_stats_entry, it, false, check_cookie))
-			break;
+		//Check if it is really contained and out port/group
+		if(__of1x_flow_entry_check_contained(&flow_stats_entry, it, false,
+									check_cookie,
+									out_port,
+									out_group,
+									true))
+			continue;
 
 		// update statistics from platform
 		platform_of1x_update_stats_hook(it);
