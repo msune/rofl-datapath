@@ -169,7 +169,7 @@ static bool __of1x_is_tern_submatch_trie(of1x_match_t* match,
 	if(!sub_match)
 		return wildcard_matches;
 
-	return __of1x_is_submatch(sub_match, match);
+	return __of1x_is_submatch(match, sub_match);
 }
 
 static bool __of1x_is_tern_complete_match_trie(of1x_match_t* match,
@@ -181,7 +181,7 @@ static bool __of1x_is_tern_complete_match_trie(of1x_match_t* match,
 	if(!m || !match)
 		return wildcard_matches;
 
-	if(__of1x_get_alike_match(match, m, &alike_match))
+	if(!__of1x_get_alike_match(match, m, &alike_match))
 		return false;
 	return __of1x_equal_matches(match, &alike_match);
 }
@@ -240,24 +240,23 @@ FIND_START:
 		goto FIND_NEXT;
 
 	//Matches, check if there is an entry
+
 	if(curr->entry){
-		if(check_complete){
-			//If check_complete is 1, we have to make sure
-			//we match completely and not partially the match
-			if(!__of1x_is_tern_complete_match_trie(leaf_match, matches, lookup))
-				goto FIND_NEXT;
+		if(!check_complete ||
+			__of1x_is_tern_complete_match_trie(leaf_match,
+								matches,
+								lookup) == true){
+			//Set result
+			res = curr->entry;
+
+			//Set prev and next pointers
+			(*prev) = curr;
+			if(curr->inner)
+				*next = curr->inner;
+			else
+				*next = curr->next;
+			goto FIND_END;
 		}
-
-		//Set result
-		res = curr->entry;
-
-		//Set prev and next pointers
-		(*prev) = curr;
-		if(curr->inner)
-			*next = curr->inner;
-		else
-			*next = curr->next;
-		goto FIND_END;
 	}
 
 	//Check inner leafs
@@ -266,7 +265,9 @@ FIND_START:
 			//If check_complete is 1, we have to make sure
 			//we match completely and not partially the match
 			if(leaf_match->type != curr->inner->match.type &&
-				! __of1x_is_tern_complete_match_trie(leaf_match, matches, lookup))
+				__of1x_is_tern_complete_match_trie(leaf_match,
+								matches,
+								lookup) == false)
 				goto FIND_NEXT;
 		}
 		//Check inner
@@ -1022,13 +1023,18 @@ rofl_result_t of1x_remove_flow_entry_trie(of1x_flow_table_t *const table,
 		//Check priority and cookie
 		if(strict == STRICT){
 			if(__of1x_check_priority_cookie_trie(aux, it, true,
-									check_cookie) == false)
-			goto REMOVE_NEXT;
-
-			if(__of1x_flow_entry_check_equal(it, entry, out_port,
+									check_cookie) == false
+				|| __of1x_flow_entry_check_equal(it, aux, out_port,
 									out_group,
 									check_cookie) == false)
-			goto REMOVE_NEXT;
+				goto REMOVE_NEXT;
+		}else{
+			if(__of1x_flow_entry_check_contained(it, aux, false,
+									false,
+									out_port,
+									out_group,
+									true) == false)
+				goto REMOVE_NEXT;
 		}
 
 		/*
