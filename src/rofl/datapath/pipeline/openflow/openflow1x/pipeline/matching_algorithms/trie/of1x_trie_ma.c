@@ -998,7 +998,7 @@ rofl_result_t of1x_remove_flow_entry_trie(of1x_flow_table_t *const table,
 	aux = (entry)? entry : specific_entry;
 
 	//No match entries
-	if(!entry->matches.head)
+	if(!aux->matches.head)
 		it = trie->entry;
 	else
 		it = NULL;
@@ -1041,7 +1041,7 @@ rofl_result_t of1x_remove_flow_entry_trie(of1x_flow_table_t *const table,
 		* If we reach this point we have to remove the current entry
 		*/
 		//Print a nice trace
-		__of1x_remove_flow_entry_table_trace(" [trie]", entry, it, reason);
+		__of1x_remove_flow_entry_table_trace(" [trie]", aux, it, reason);
 
 		//Call platform hook
 		platform_of1x_remove_entry_hook(it);
