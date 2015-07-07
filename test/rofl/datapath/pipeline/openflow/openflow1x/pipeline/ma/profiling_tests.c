@@ -176,10 +176,10 @@ int main(int args, char** argv){
 	(NULL == CU_add_test(pSuite, "Basic profiling (single flow_mod); match match (no lock)", profile_basic_match_no_lock)) ||
 	(NULL == CU_add_test(pSuite, "Basic profiling (single flow_mod); match no-match (no lock)", profile_basic_no_match_no_lock)) ||
 	(NULL == CU_add_test(pSuite, "Reset (use trie now)", reset)) ||
-	(NULL == CU_add_test(pSuite, "Basic profiling (single flow_mod); match match (lock)", profile_basic_match_lock)) ||
-	(NULL == CU_add_test(pSuite, "Basic profiling (single flow_mod); match no-match (lock)", profile_basic_no_match_lock)) || 
-	(NULL == CU_add_test(pSuite, "Basic profiling (single flow_mod); match match (no lock)", profile_basic_match_no_lock)) ||
-	(NULL == CU_add_test(pSuite, "Basic profiling (single flow_mod); match no-match (no lock)", profile_basic_no_match_no_lock)) 
+	(NULL == CU_add_test(pSuite, "[trie] Basic profiling (single flow_mod); match match (lock)", profile_basic_match_lock)) ||
+	(NULL == CU_add_test(pSuite, "[trie] Basic profiling (single flow_mod); match no-match (lock)", profile_basic_no_match_lock)) || 
+	(NULL == CU_add_test(pSuite, "[trie] Basic profiling (single flow_mod); match match (no lock)", profile_basic_match_no_lock)) ||
+	(NULL == CU_add_test(pSuite, "[trie] Basic profiling (single flow_mod); match no-match (no lock)", profile_basic_no_match_no_lock)) 
 		
 		)
 	{
