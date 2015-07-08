@@ -220,6 +220,11 @@ FIND_START:
 	//Set next
 	curr = *next;
 
+	//Sanity checks
+	assert(!curr || !curr->prev || (curr->prev->next == curr));
+	assert(!curr || !curr->next || (curr->next->prev == curr));
+	assert(!curr || !curr->parent || curr->prev || (curr->parent->inner == curr));
+
 	//If next is NULL and the prev has a parent, that means go down
 	//in the tree. It might be that the very last leaf of the tree is matched
 	//hence we are done
@@ -465,6 +470,11 @@ static rofl_of1x_fm_result_t __of1x_insert_intermediate_leaf_trie(of1x_trie_t* t
 		new_branch->prev = l;
 		new_branch->next = NULL;
 	}
+
+	if(l->next)
+		l->next->prev = intermediate;
+	if(l->prev)
+		l->prev->next = intermediate;
 
 	//Previous leaf now child
 	l->parent = intermediate;
